@@ -6,6 +6,8 @@ import time
 import rospy
 from obstacle_detector.msg import Obstacles
 from nav_msgs.msg import Odometry
+from geometry_msgs.msg import PoseWithCovarianceStamped
+from tf.transformations import quaternion_from_euler
 
 class EKF:
 
@@ -40,6 +42,7 @@ class EKF:
         rospy.init_node('ekf_localization', anonymous=True)
         self.odom_sub = rospy.Subscriber("odom", Odometry, self.odom_sub_callback)
         self.obstacles_sub = rospy.Subscriber("obstacles", Obstacles, self.obstacles_sub_callback)
+        self.ekf_pose_pub = rospy.Publisher("ekf_pose", PoseWithCovarianceStamped, queue_size=10)
         # self.rate = rospy.Rate(30)
         
     def ekf_localization(self, v, w):
@@ -57,20 +60,20 @@ class EKF:
         
         # ekf predict step:
         if w == 0:
-            G = np.array([[1, 0,  v*c],\
-                          [0, 1, -v*s],\
-                          [0, 0,    1]])
+            G = np.array([[1, 0, -v*s*self.dt],\
+                          [0, 1,  v*c*self.dt],\
+                          [0, 0,            1]])
 
-            V = np.array([[s, 0],\
-                          [c, 0],\
-                          [0, 0]])
+            V = np.array([[c*self.dt, 0],\
+                          [s*self.dt, 0],\
+                          [0        , 0]])
 
             M = np.array([[a1*v**2 + a2*w**2,                 0],\
                           [                0, a3*v**2 + a4*w**2]])
 
-            mu_bar = self.mu_past.copy() + np.array([[v*s],\
-                                                     [v*c],\
-                                                     [  0]])
+            mu_bar = self.mu_past.copy() + np.array([[v*c*self.dt],\
+                                                     [v*s*self.dt],\
+                                                     [          0]])
         
         else:
             G = np.array([[1, 0, (v*(-c+c_dt))/w],\
@@ -90,34 +93,46 @@ class EKF:
             mu_bar[2,0] = self._angle_limit_checking(mu_bar[2,0])
         
 
-        sigma_bar = G@self.sigma_past@np.transpose(G) + V@M@np.transpose(V)
+        sigma_bar = G@self.sigma_past@G.T + V@M@V.T
 
         # ekf update step:
+        Q = np.diag((0.2, 0.2, 0.2))
         if self.if_new_obstacles is True:
             # for every obstacle (or beacon pillar), check the distance between real beacon position and itself.
             for landmark_scan in np.nditer(self.beacon_scan, flags=['external_loop'], order='F'):
                 landmark_scan = np.reshape(landmark_scan, (2,1))
-                # transfer the coordinate of landmark_scan from base_laser_link to map
-                landmark_scan = self._tf_laser_to_map(mu_bar, landmark_scan)
-                min_dist = 9999
-                min_index = 0
-                for i in range(self.beacon_position.shape[1]):
-                    landmark_i = np.reshape(self.beacon_position[:,i], (2,1))
-                    q = self._euclidean_distance(landmark_scan, landmark_i)
-
-            # for testing
-            self.mu = mu_bar.copy()
-            self.sigma = sigma_bar.copy()
-            # print(self.sigma)
-            self.mu_past = self.mu.copy()
-            self.sigma_past = self.sigma.copy()
+                # transfer landmark_scan type from (x, y) to (r, phi)
+                z_i = self._cartesian_to_polar(landmark_scan, np.zeros((3,1)))
+                j_max = 0
+                H_j_max = 0
+                S_j_max = 0
+                z_j_max = 0
+                for k in range(self.beacon_position.shape[1]):
+                    landmark_k = np.reshape(self.beacon_position[:,k], (2,1))
+                    z_k, H_k = self._cartesian_to_polar(landmark_k, mu_bar, cal_H=True)
+                    S_k = H_k@sigma_bar@H_k.T + Q
+                    try:
+                        j_k = 1/np.sqrt(np.linalg.det(2*np.pi*S_k)) * np.exp(-0.5*(z_i-z_k).T@np.linalg.inv(S_k)@(z_i-z_k))
+                    except Exception as e:
+                        print("S_k = ", S_k, "H_k = ", H_k, "sigma_bar = ", sigma_bar)
+                        print(e)
+                    if j_k > j_max:
+                        j_max = j_k
+                        H_j_max = H_k
+                        S_j_max = S_k
+                        z_j_max = z_k
+                if j_max != 0:
+                    K_i = sigma_bar@H_j_max.T@np.linalg.inv(S_j_max)
+                    # print(j_max)
+                    mu_bar = mu_bar + K_i@(z_i-z_j_max)
+                    sigma_bar = (np.eye(3) - K_i@H_j_max)@sigma_bar
+        
+        self.mu = mu_bar.copy()
+        self.sigma = sigma_bar.copy()
+        self.mu_past = self.mu.copy()
+        self.sigma_past = self.sigma.copy()
         # finish once ekf, change the flag
         self.if_new_obstacles = False
-
-        
-        # A = np.array([[],\
-        #               [],\
-        #               []])
 
     def _euclidean_distance(self, a, b):
         return np.sqrt((b[1, 0]-a[1, 0])**2 + (b[0, 0]-a[0, 0])**2)
@@ -128,6 +143,24 @@ class EKF:
         elif theta <= -np.pi:
             theta += 2 * np.pi
         return theta
+
+    # find polar coordinate for point a from ref point b
+    def _cartesian_to_polar(self, a, b, cal_H=False):
+        q_sqrt = self._euclidean_distance(a, b)
+        q = q_sqrt**2
+        a_b_x = a[0, 0]-b[0, 0]
+        a_b_y = a[1, 0]-b[1, 0]
+        z_hat = np.array([[q_sqrt],\
+                          [np.arctan2(a_b_y, a_b_x) - b[2, 0]],\
+                          [1]])
+        z_hat[1,0] = self._angle_limit_checking(z_hat[1,0])
+        if cal_H:
+            H = np.array([[-(a_b_x/q_sqrt), -(a_b_y/q_sqrt),  0],\
+                          [        a_b_y/q,      -(a_b_x/q), -1],\
+                          [              0,               0,  0]])
+            return (z_hat, H)
+        else:
+            return z_hat
 
     def _tf_laser_to_map(self, mu_bar, landmark_scan):
         # rotate theta and translation (x, y) from the laser frame 
@@ -140,6 +173,7 @@ class EKF:
         v = odom.twist.twist.linear.x
         w = odom.twist.twist.angular.z
         self.ekf_localization(v, w)
+        self.publish_ekf_pose(odom.header)
 
     def obstacles_sub_callback(self, obstacles):
         self.if_new_obstacles = False
@@ -151,6 +185,28 @@ class EKF:
             else:
                 self.beacon_scan = np.hstack([self.beacon_scan, center_xy])
         self.if_new_obstacles = True
+
+    def publish_ekf_pose(self, header):
+        pose = PoseWithCovarianceStamped()
+        pose.header = header
+        pose.header.frame_id = "map"
+        pose.pose.pose.position.x = self.mu[0,0]
+        pose.pose.pose.position.y = self.mu[1,0]
+        quat = quaternion_from_euler(0, 0, self.mu[2,0])
+        pose.pose.pose.orientation.x = quat[0]
+        pose.pose.pose.orientation.y = quat[1]
+        pose.pose.pose.orientation.z = quat[2]
+        pose.pose.pose.orientation.w = quat[3]
+        pose.pose.covariance[0] = self.sigma[0,0] # x-x
+        pose.pose.covariance[1] = self.sigma[0,1] # x-y
+        pose.pose.covariance[5] = self.sigma[0,2] # x-theta
+        pose.pose.covariance[6] = self.sigma[1,0] # y-x
+        pose.pose.covariance[7] = self.sigma[1,1] # y-y
+        pose.pose.covariance[11] = self.sigma[1,2] # y-theta
+        pose.pose.covariance[30] = self.sigma[2,0] # theta-x
+        pose.pose.covariance[31] = self.sigma[2,1] # theta-y
+        pose.pose.covariance[35] = self.sigma[2,2] # theta-theta
+        self.ekf_pose_pub.publish(pose)
 
 if __name__ == '__main__':
     # rospy.init_node('ekf_localization', anonymous=True)
