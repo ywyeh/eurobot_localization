@@ -41,7 +41,7 @@ class EKF:
         # for ros
         rospy.init_node('ekf_localization', anonymous=True)
         self.odom_sub = rospy.Subscriber("odom", Odometry, self.odom_sub_callback)
-        self.obstacles_sub = rospy.Subscriber("obstacles", Obstacles, self.obstacles_sub_callback)
+        self.obstacles_sub = rospy.Subscriber("raw_obstacles", Obstacles, self.obstacles_sub_callback)
         self.ekf_pose_pub = rospy.Publisher("ekf_pose", PoseWithCovarianceStamped, queue_size=10)
         # self.rate = rospy.Rate(30)
         
@@ -94,9 +94,10 @@ class EKF:
         
 
         sigma_bar = G@self.sigma_past@G.T + V@M@V.T
-
+        sigma_bar = self._check_sigma_is_positive(sigma_bar)
+        
         # ekf update step:
-        Q = np.diag((0.2, 0.2, 0.2))
+        Q = np.diag((0.001, 0.2, 0.02))
         if self.if_new_obstacles is True:
             # for every obstacle (or beacon pillar), check the distance between real beacon position and itself.
             for landmark_scan in np.nditer(self.beacon_scan, flags=['external_loop'], order='F'):
@@ -114,8 +115,8 @@ class EKF:
                     try:
                         j_k = 1/np.sqrt(np.linalg.det(2*np.pi*S_k)) * np.exp(-0.5*(z_i-z_k).T@np.linalg.inv(S_k)@(z_i-z_k))
                     except Exception as e:
-                        print("S_k = ", S_k, "H_k = ", H_k, "sigma_bar = ", sigma_bar)
                         print(e)
+                    # print("S_k-Q = ", H_k@sigma_bar@H_k.T, "H_k = ", H_k, "sigma_bar = ", sigma_bar)
                     if j_k > j_max:
                         j_max = j_k
                         H_j_max = H_k
@@ -126,9 +127,9 @@ class EKF:
                     # print(j_max)
                     mu_bar = mu_bar + K_i@(z_i-z_j_max)
                     sigma_bar = (np.eye(3) - K_i@H_j_max)@sigma_bar
-        
+
         self.mu = mu_bar.copy()
-        self.sigma = sigma_bar.copy()
+        self.sigma = self._check_sigma_is_positive(sigma_bar.copy())
         self.mu_past = self.mu.copy()
         self.sigma_past = self.sigma.copy()
         # finish once ekf, change the flag
@@ -168,6 +169,13 @@ class EKF:
         c = np.cos(mu_bar[2,0])
         landmark_scan = np.array([[c, -s],[s, c]])@landmark_scan + np.reshape(mu_bar[0:2, 0], (2,1))
         return landmark_scan
+
+    def _check_sigma_is_positive(self, sigma):
+        with np.nditer(sigma, order='C', op_flags=['readwrite']) as it:
+            for x in it:
+                if x < 1e-15:
+                    x[...] = 0.0
+        return sigma
 
     def odom_sub_callback(self, odom):
         v = odom.twist.twist.linear.x
