@@ -47,10 +47,12 @@ class EKF:
         
     def ekf_localization(self, v, w):
         # set motion covariance
-        a1 = 0.01
-        a2 = 0.01
-        a3 = 0.01
-        a4 = 0.01
+        a1 = 0.5
+        a2 = 0.8
+        a3 = 0.5
+        a4 = 0.8
+        # set a minimum likelihood value
+        mini_likelihood = 0.5
         # for convenience, ex: s_dt = sin(theta+wdt) 
         theta = self.mu_past[2, 0].copy()
         s = np.sin(theta)
@@ -59,7 +61,7 @@ class EKF:
         c_dt = np.cos(theta + w*self.dt)
         
         # ekf predict step:
-        if w == 0:
+        if w < 1e-5 and w > -1e-5 :
             G = np.array([[1, 0, -v*s*self.dt],\
                           [0, 1,  v*c*self.dt],\
                           [0, 0,            1]])
@@ -94,7 +96,8 @@ class EKF:
         
 
         sigma_bar = G@self.sigma_past@G.T + V@M@V.T
-        sigma_bar = self._check_sigma_is_positive(sigma_bar)
+        # sigma_bar = self._fix_FP_issue(sigma_bar)
+        sigma_bar[sigma_bar<1e-10] = 0
         
         # ekf update step:
         Q = np.diag((0.001, 0.2, 0.02))
@@ -108,28 +111,39 @@ class EKF:
                 H_j_max = 0
                 S_j_max = 0
                 z_j_max = 0
+                # print("j_k: ")
                 for k in range(self.beacon_position.shape[1]):
                     landmark_k = np.reshape(self.beacon_position[:,k], (2,1))
                     z_k, H_k = self._cartesian_to_polar(landmark_k, mu_bar, cal_H=True)
                     S_k = H_k@sigma_bar@H_k.T + Q
+                    # S_k = self._fix_FP_issue(S_k)
+                    S_k[S_k<1e-10] = 0
+                    # print(S_k)
                     try:
-                        j_k = 1/np.sqrt(np.linalg.det(2*np.pi*S_k)) * np.exp(-0.5*(z_i-z_k).T@np.linalg.inv(S_k)@(z_i-z_k))
+                        # original 
+                        # j_k = 1/np.sqrt(np.linalg.det(2*np.pi*S_k)) * np.exp(-0.5*(z_i-z_k).T@np.linalg.inv(S_k)@(z_i-z_k))
+                        # ln(j_k()) version
+                        j_k = -0.5*(z_i-z_k).T@np.linalg.inv(S_k)@(z_i-z_k) - np.log(np.sqrt(np.linalg.det(2*np.pi*S_k)))
+                        # j_k = self._fix_FP_issue(j_k)
+                        j_k[j_k<1e-10] = 0
+                        if np.around(j_k, 10)[0,0] > np.around(j_max, 10):
+                            j_max = j_k.copy()
+                            H_j_max = H_k.copy()
+                            S_j_max = S_k.copy()
+                            z_j_max = z_k.copy()
                     except Exception as e:
-                        print(e)
+                        rospy.logerr("%s", e)
+                        # continue
+                    # rospy.loginfo("H_k=%s, sigma_bar=%s, S_k=%s", H_k, sigma_bar, S_k)
                     # print("S_k-Q = ", H_k@sigma_bar@H_k.T, "H_k = ", H_k, "sigma_bar = ", sigma_bar)
-                    if j_k > j_max:
-                        j_max = j_k
-                        H_j_max = H_k
-                        S_j_max = S_k
-                        z_j_max = z_k
-                if j_max != 0:
+                if j_max > mini_likelihood and j_max != np.nan:
                     K_i = sigma_bar@H_j_max.T@np.linalg.inv(S_j_max)
                     # print(j_max)
                     mu_bar = mu_bar + K_i@(z_i-z_j_max)
-                    sigma_bar = (np.eye(3) - K_i@H_j_max)@sigma_bar
+                    sigma_bar = (np.eye(3) - self._fix_FP_issue(K_i@H_j_max))@sigma_bar
 
         self.mu = mu_bar.copy()
-        self.sigma = self._check_sigma_is_positive(sigma_bar.copy())
+        self.sigma = self._fix_FP_issue(sigma_bar.copy())
         self.mu_past = self.mu.copy()
         self.sigma_past = self.sigma.copy()
         # finish once ekf, change the flag
@@ -170,12 +184,19 @@ class EKF:
         landmark_scan = np.array([[c, -s],[s, c]])@landmark_scan + np.reshape(mu_bar[0:2, 0], (2,1))
         return landmark_scan
 
-    def _check_sigma_is_positive(self, sigma):
-        with np.nditer(sigma, order='C', op_flags=['readwrite']) as it:
-            for x in it:
-                if x < 1e-15:
-                    x[...] = 0.0
-        return sigma
+    def _fix_FP_issue(self, matrix, upper_bound=1e-10, lower_bound=-1e-10, positive=True):
+        if positive is True:
+            with np.nditer(matrix, order='C', op_flags=['readwrite']) as it:
+                for x in it:
+                    if x < upper_bound:
+                        x[...] = 0.0
+            return matrix
+        else:
+            with np.nditer(matrix, order='C', op_flags=['readwrite']) as it:
+                for x in it:
+                    if x < upper_bound and x > lower_bound:
+                        x[...] = 0.0
+            return matrix
 
     def odom_sub_callback(self, odom):
         v = odom.twist.twist.linear.x
