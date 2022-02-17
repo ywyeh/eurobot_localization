@@ -7,7 +7,10 @@ import rospy
 from obstacle_detector.msg import Obstacles
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from geometry_msgs.msg import TransformStamped
 from tf.transformations import quaternion_from_euler
+from tf.transformations import euler_from_quaternion
+from tf2_ros import TransformBroadcaster
 
 class EKF:
 
@@ -43,6 +46,10 @@ class EKF:
         self.odom_sub = rospy.Subscriber("odom", Odometry, self.odom_sub_callback)
         self.obstacles_sub = rospy.Subscriber("raw_obstacles", Obstacles, self.obstacles_sub_callback)
         self.ekf_pose_pub = rospy.Publisher("ekf_pose", PoseWithCovarianceStamped, queue_size=10)
+        self.ekf_pose_tfbr = TransformBroadcaster()
+        
+        self.map_frame_name = "map"
+        self.robot_frame_name = "base_footprint"
         # self.rate = rospy.Rate(30)
         
     def ekf_localization(self, v, w):
@@ -125,7 +132,8 @@ class EKF:
                         # ln(j_k()) version
                         j_k = -0.5*(z_i-z_k).T@np.linalg.inv(S_k)@(z_i-z_k) - np.log(np.sqrt(np.linalg.det(2*np.pi*S_k)))
                         # j_k = self._fix_FP_issue(j_k)
-                        j_k[j_k<1e-10] = 0
+                        # j_k[j_k<1e-10] = 0
+                        # print(j_k)
                         if np.around(j_k, 10)[0,0] > np.around(j_max, 10):
                             j_max = j_k.copy()
                             H_j_max = H_k.copy()
@@ -199,10 +207,13 @@ class EKF:
             return matrix
 
     def odom_sub_callback(self, odom):
+        stamp = rospy.Time.now()
+        # rospy.loginfo("odom time: %s, now: %s", odom.header.stamp, stamp)
         v = odom.twist.twist.linear.x
         w = odom.twist.twist.angular.z
         self.ekf_localization(v, w)
-        self.publish_ekf_pose(odom.header)
+        self.publish_ekf_pose(stamp + rospy.Duration(0.2))
+        self.broadcast_ekf_pos_tf(odom)
 
     def obstacles_sub_callback(self, obstacles):
         self.if_new_obstacles = False
@@ -215,17 +226,17 @@ class EKF:
                 self.beacon_scan = np.hstack([self.beacon_scan, center_xy])
         self.if_new_obstacles = True
 
-    def publish_ekf_pose(self, header):
+    def publish_ekf_pose(self, stamp):
         pose = PoseWithCovarianceStamped()
-        pose.header = header
-        pose.header.frame_id = "map"
+        pose.header.stamp = stamp
+        pose.header.frame_id = self.map_frame_name
         pose.pose.pose.position.x = self.mu[0,0]
         pose.pose.pose.position.y = self.mu[1,0]
-        quat = quaternion_from_euler(0, 0, self.mu[2,0])
-        pose.pose.pose.orientation.x = quat[0]
-        pose.pose.pose.orientation.y = quat[1]
-        pose.pose.pose.orientation.z = quat[2]
-        pose.pose.pose.orientation.w = quat[3]
+        q = quaternion_from_euler(0, 0, self.mu[2,0])
+        pose.pose.pose.orientation.x = q[0]
+        pose.pose.pose.orientation.y = q[1]
+        pose.pose.pose.orientation.z = q[2]
+        pose.pose.pose.orientation.w = q[3]
         pose.pose.covariance[0] = self.sigma[0,0] # x-x
         pose.pose.covariance[1] = self.sigma[0,1] # x-y
         pose.pose.covariance[5] = self.sigma[0,2] # x-theta
@@ -236,6 +247,23 @@ class EKF:
         pose.pose.covariance[31] = self.sigma[2,1] # theta-y
         pose.pose.covariance[35] = self.sigma[2,2] # theta-theta
         self.ekf_pose_pub.publish(pose)
+
+    def broadcast_ekf_pos_tf(self, odom):
+        t = TransformStamped()
+        t.header.stamp = odom.header.stamp
+        t.header.frame_id = self.map_frame_name
+        t.child_frame_id = odom.header.frame_id
+        t.transform.translation.x = self.mu[0,0] - odom.pose.pose.position.x
+        t.transform.translation.y = self.mu[1,0] - odom.pose.pose.position.y
+        t.transform.translation.z = 0.0
+        odom_bf_theta = euler_from_quaternion([odom.pose.pose.orientation.x, odom.pose.pose.orientation.y,\
+                                               odom.pose.pose.orientation.z, odom.pose.pose.orientation.w])[2]
+        q = quaternion_from_euler(0, 0, self.mu[2,0] - odom_bf_theta)
+        t.transform.rotation.x = q[0]
+        t.transform.rotation.y = q[1]
+        t.transform.rotation.z = q[2]
+        t.transform.rotation.w = q[3]
+        self.ekf_pose_tfbr.sendTransform(t)
 
 if __name__ == '__main__':
     # rospy.init_node('ekf_localization', anonymous=True)
