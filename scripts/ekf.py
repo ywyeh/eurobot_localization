@@ -1,16 +1,13 @@
 #!/usr/bin/python3
 import numpy as np
-import time
 
 # for ros
 import rospy
 from obstacle_detector.msg import Obstacles
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped
-from geometry_msgs.msg import TransformStamped
-from tf.transformations import quaternion_from_euler
-from tf.transformations import euler_from_quaternion
-from tf2_ros import TransformBroadcaster
+from tf import TransformBroadcaster
+import tf.transformations as tf_t
 
 class EKF:
 
@@ -26,13 +23,11 @@ class EKF:
         
         # for robot state
         self.mu_past = self.mu_0.copy()
-        # self.mu_bar = np.zeros((3,1))
         self.mu = np.array([[0.0],\
                             [0.0],\
                             [0.0]])
 
         self.sigma_past = np.zeros((3,3))
-        # self.sigma_bar = np.zeros((3,3))
         self.sigma = np.zeros((3,3))
 
         self.dt = 1/50
@@ -50,7 +45,6 @@ class EKF:
         
         self.map_frame_name = "map"
         self.robot_frame_name = "base_footprint"
-        # self.rate = rospy.Rate(30)
         
     def ekf_localization(self, v, w):
         # set motion covariance
@@ -100,11 +94,9 @@ class EKF:
                                                      [ v*(c-c_dt)/w],\
                                                      [    w*self.dt]])
             mu_bar[2,0] = self._angle_limit_checking(mu_bar[2,0])
-        
 
         sigma_bar = G@self.sigma_past@G.T + V@M@V.T
-        # sigma_bar = self._fix_FP_issue(sigma_bar)
-        sigma_bar[sigma_bar<1e-10] = 0
+        sigma_bar = self._fix_FP_issue(sigma_bar)
         
         # ekf update step:
         Q = np.diag((0.001, 0.2, 0.02))
@@ -118,22 +110,17 @@ class EKF:
                 H_j_max = 0
                 S_j_max = 0
                 z_j_max = 0
-                # print("j_k: ")
                 for k in range(self.beacon_position.shape[1]):
                     landmark_k = np.reshape(self.beacon_position[:,k], (2,1))
                     z_k, H_k = self._cartesian_to_polar(landmark_k, mu_bar, cal_H=True)
                     S_k = H_k@sigma_bar@H_k.T + Q
-                    # S_k = self._fix_FP_issue(S_k)
-                    S_k[S_k<1e-10] = 0
-                    # print(S_k)
+                    S_k = self._fix_FP_issue(S_k)
                     try:
                         # original 
                         # j_k = 1/np.sqrt(np.linalg.det(2*np.pi*S_k)) * np.exp(-0.5*(z_i-z_k).T@np.linalg.inv(S_k)@(z_i-z_k))
+                        
                         # ln(j_k()) version
                         j_k = -0.5*(z_i-z_k).T@np.linalg.inv(S_k)@(z_i-z_k) - np.log(np.sqrt(np.linalg.det(2*np.pi*S_k)))
-                        # j_k = self._fix_FP_issue(j_k)
-                        # j_k[j_k<1e-10] = 0
-                        # print(j_k)
                         if np.around(j_k, 10)[0,0] > np.around(j_max, 10):
                             j_max = j_k.copy()
                             H_j_max = H_k.copy()
@@ -146,7 +133,6 @@ class EKF:
                     # print("S_k-Q = ", H_k@sigma_bar@H_k.T, "H_k = ", H_k, "sigma_bar = ", sigma_bar)
                 if j_max > mini_likelihood and j_max != np.nan:
                     K_i = sigma_bar@H_j_max.T@np.linalg.inv(S_j_max)
-                    # print(j_max)
                     mu_bar = mu_bar + K_i@(z_i-z_j_max)
                     sigma_bar = (np.eye(3) - self._fix_FP_issue(K_i@H_j_max))@sigma_bar
 
@@ -185,26 +171,17 @@ class EKF:
         else:
             return z_hat
 
+    # rotate theta and translation (x, y) from the laser frame 
     def _tf_laser_to_map(self, mu_bar, landmark_scan):
-        # rotate theta and translation (x, y) from the laser frame 
         s = np.sin(mu_bar[2,0])
         c = np.cos(mu_bar[2,0])
         landmark_scan = np.array([[c, -s],[s, c]])@landmark_scan + np.reshape(mu_bar[0:2, 0], (2,1))
         return landmark_scan
 
-    def _fix_FP_issue(self, matrix, upper_bound=1e-10, lower_bound=-1e-10, positive=True):
-        if positive is True:
-            with np.nditer(matrix, order='C', op_flags=['readwrite']) as it:
-                for x in it:
-                    if x < upper_bound:
-                        x[...] = 0.0
-            return matrix
-        else:
-            with np.nditer(matrix, order='C', op_flags=['readwrite']) as it:
-                for x in it:
-                    if x < upper_bound and x > lower_bound:
-                        x[...] = 0.0
-            return matrix
+    # if value less than upper_bound then equal to 0
+    def _fix_FP_issue(self, matrix, upper_bound=1e-10):
+        matrix[matrix<upper_bound] = 0
+        return matrix
 
     def odom_sub_callback(self, odom):
         stamp = rospy.Time.now()
@@ -232,7 +209,7 @@ class EKF:
         pose.header.frame_id = self.map_frame_name
         pose.pose.pose.position.x = self.mu[0,0]
         pose.pose.pose.position.y = self.mu[1,0]
-        q = quaternion_from_euler(0, 0, self.mu[2,0])
+        q = tf_t.quaternion_from_euler(0, 0, self.mu[2,0])
         pose.pose.pose.orientation.x = q[0]
         pose.pose.pose.orientation.y = q[1]
         pose.pose.pose.orientation.z = q[2]
@@ -249,24 +226,23 @@ class EKF:
         self.ekf_pose_pub.publish(pose)
 
     def broadcast_ekf_pos_tf(self, odom):
-        t = TransformStamped()
-        t.header.stamp = odom.header.stamp
-        t.header.frame_id = self.map_frame_name
-        t.child_frame_id = odom.header.frame_id
-        t.transform.translation.x = self.mu[0,0] - odom.pose.pose.position.x
-        t.transform.translation.y = self.mu[1,0] - odom.pose.pose.position.y
-        t.transform.translation.z = 0.0
-        odom_bf_theta = euler_from_quaternion([odom.pose.pose.orientation.x, odom.pose.pose.orientation.y,\
-                                               odom.pose.pose.orientation.z, odom.pose.pose.orientation.w])[2]
-        q = quaternion_from_euler(0, 0, self.mu[2,0] - odom_bf_theta)
-        t.transform.rotation.x = q[0]
-        t.transform.rotation.y = q[1]
-        t.transform.rotation.z = q[2]
-        t.transform.rotation.w = q[3]
-        self.ekf_pose_tfbr.sendTransform(t)
+        map_to_baseft = tf_t.concatenate_matrices(
+                        tf_t.translation_matrix((self.mu[0,0], self.mu[1,0], 0)),
+                        tf_t.quaternion_matrix(tf_t.quaternion_from_euler(0, 0, self.mu[2,0])))
+        # baseft_to_map = tf_t.inverse_matrix(map_to_baseft)
+        odom_to_baseft = tf_t.concatenate_matrices(
+                         tf_t.translation_matrix((odom.pose.pose.position.x, odom.pose.pose.position.y, 0)),
+                         tf_t.quaternion_matrix((0, 0, odom.pose.pose.orientation.z, odom.pose.pose.orientation.w)))
+        baseft_to_odom =  tf_t.inverse_matrix(odom_to_baseft)
+        map_to_odom = tf_t.concatenate_matrices(map_to_baseft, baseft_to_odom)
+
+        self.ekf_pose_tfbr.sendTransform(tf_t.translation_from_matrix(map_to_odom),
+                                         tf_t.quaternion_from_matrix(map_to_odom),
+                                         odom.header.stamp,
+                                         odom.header.frame_id,
+                                         self.map_frame_name)
 
 if __name__ == '__main__':
-    # rospy.init_node('ekf_localization', anonymous=True)
     ekf = EKF()
     while not rospy.is_shutdown():
         rospy.spin()
