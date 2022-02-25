@@ -1,7 +1,10 @@
 #include <ros/ros.h>
+#include <ros/console.h>
 // tf2
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2/LinearMath/Transform.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 // for matrix calculate
 #include <Eigen/Dense>
 #include <math.h>
@@ -11,24 +14,30 @@
 #include <geometry_msgs/TransformStamped.h>
 #include "obstacle_detector/Obstacles.h"
 
+struct RobotState{
+    Eigen::Vector3d mu;
+    Eigen::Matrix3d sigma;
+};
+
 class Ekf{
     public:
-        Ekf(ros::NodeHandle& nh);
-    private:
+        Ekf(ros::NodeHandle& nh): nh_(nh){};
         void initialize();
+    private:
         // ekf 
-        void predict();
+        void predict_diff(double v, double w);
+        void predict_ormi(double v, double w);
         void update();
         // several util function
-        double euclideanDistance();
-        double angleLimitChecking();
+        double euclideanDistance(Eigen::Vector3d a, Eigen::Vector3d b);
+        double angleLimitChecking(double theta);
         void cartesianToPolar();
         double degToRad(double deg){ return deg*M_PI/180.0 ;}
         // for ros
-        void odomCallback(const nav_msgs::Odometry::ConstPtr odom_msg);
-        void obstaclesCallback(const obstacle_detector::Obstacles::ConstPtr obstacle_msg);
-        void publishEkfPose();
-        void broadcastEkfTransform();
+        void odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg);
+        void obstaclesCallback(const obstacle_detector::Obstacles::ConstPtr& obstacle_msg);
+        void publishEkfPose(const ros::Time& stamp);
+        void broadcastEkfTransform(const nav_msgs::Odometry::ConstPtr& odom_msg);
 
         // for beacon position in map std::list<double>{ax, ay, bx, by, cx, cy}
         std::list<Eigen::Vector2d> beacon_in_map_;
@@ -39,10 +48,9 @@ class Ekf{
 
         // for robot state
         Eigen::Vector3d mu_0_;
-        Eigen::Vector3d mu_past_;
-        Eigen::Vector3d mu_;
-        Eigen::Matrix3d sigma_past_;
-        Eigen::Matrix3d sigma_;
+        RobotState robotstate_past_;
+        RobotState robotstate_bar_;
+        RobotState robotstate_;
         double dt_;
 
         // ros parameter
