@@ -101,7 +101,7 @@ class EKF:
         # ekf update step:
         Q = np.diag((0.001, 0.2, 0.02))
         if self.if_new_obstacles is True:
-            # for every obstacle (or beacon pillar), check the distance between real beacon position and itself.
+            # for every obstacle (or beacon pillar), calculate how likely it is the correct pillar.
             for landmark_scan in np.nditer(self.beacon_scan, flags=['external_loop'], order='F'):
                 landmark_scan = np.reshape(landmark_scan, (2,1))
                 # transfer landmark_scan type from (x, y) to (r, phi)

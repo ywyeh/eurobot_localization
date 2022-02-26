@@ -6,7 +6,7 @@ void Ekf::initialize(){
     nh_.param<string>("robot_name", p_robot_name_, "");
     nh_.param<double>("initial_x", p_initial_x_, 0.5);
     nh_.param<double>("initial_y", p_initial_y_, 0.5);
-    nh_.param<double>("initial_theta", p_initial_theta_deg_, 90);
+    nh_.param<double>("initial_theta", p_initial_theta_deg_, 90.0);
 
     // for beacon position in map list<double>{ax, ay, bx, by, cx, cy}
     Eigen::Vector2d beacon_a {0.05,  3.1};
@@ -24,7 +24,15 @@ void Ekf::initialize(){
     robotstate_bar_.sigma << 0, 0, 0, 0, 0, 0, 0, 0, 0;
     robotstate_.mu << 0, 0, 0;
     robotstate_.sigma << 0, 0, 0, 0, 0, 0, 0, 0, 0;
-    dt_ = 1/50;
+    dt_ = 1.0/50.0;
+
+    // ekf parameter
+    a1_ = 0.5;
+    a2_ = 0.8;
+    a3_ = 0.5;
+    a4_ = 0.8;
+    Q_ = Eigen::Vector3d{0.001, 0.2, 0.02}.asDiagonal();
+    mini_likelihood_ = 0.5;
 
     // for beacon piller detection
     if_new_obstacles_ = false;
@@ -37,7 +45,43 @@ void Ekf::initialize(){
 }
 
 void Ekf::predict_diff(double v, double w){
-    // cout << v << w << endl;
+    double theta = robotstate_past_.mu(2);
+    double s = sin(theta);
+    double c = cos(theta);
+    double s_dt = sin(theta + w*dt_);
+    double c_dt = cos(theta + w*dt_);
+    // cout << "sin= " << s << ",cos= " << c << ", theta= " << theta << endl;
+    
+    //ekf predict step
+    Eigen::Matrix3d G;
+    Eigen::Matrix<double, 3, 2> V; 
+    Eigen::Matrix2d M;
+    
+
+    if((w < 0.00001) && (w > -0.00001)){
+        G << 1.0, 0.0, -v*s*dt_,
+             0.0, 1.0,  c*v*dt_,
+             0.0, 0.0,      1.0;
+        V << c*dt_, 0.0,
+             s*dt_, 0.0,
+               0.0, 0.0;
+        robotstate_bar_.mu = robotstate_past_.mu + Eigen::Vector3d {v*c*dt_, v*s*dt_, 0.0};
+        // cout << robotstate_bar_.mu << endl;
+    }
+    else{
+        G << 1.0,  0.0, (v*(-c+c_dt))/w,
+             0.0,  1.0, (v*(-s+s_dt))/w,
+             0.0,  0.0,             1.0;
+        V << (-s+s_dt)/w,  v*(s-s_dt)/pow(w,2) + v*dt_*(c_dt)/w,
+              (c-c_dt)/w, -v*(c-c_dt)/pow(w,2) + v*dt_*(s_dt)/w,
+                     0.0,                                   dt_;
+        robotstate_bar_.mu = robotstate_past_.mu + Eigen::Vector3d {v*(-s+s_dt)/w, v*(c-c_dt)/w, w*dt_};
+        robotstate_bar_.mu(2) = angleLimitChecking(robotstate_bar_.mu(2));
+    }
+    
+    M << pow(a1_*v, 2)+pow(a2_*w, 2),                         0.0,
+                                 0.0, pow(a3_*v, 2)+pow(a4_*w, 2);
+    robotstate_bar_.sigma = G*robotstate_past_.sigma*G.transpose() + V*M*V.transpose();
 }
 
 void Ekf::predict_ormi(double v, double w){
@@ -45,8 +89,18 @@ void Ekf::predict_ormi(double v, double w){
 }
 
 void Ekf::update(){
-
-robotstate_ = robotstate_past_; // for tf testing
+    // ekf update step:
+    if(if_new_obstacles_){
+        while(!beacon_from_scan_.empty()){
+            Eigen::Vector2d landmark_scan = beacon_from_scan_.back();
+            beacon_from_scan_.pop_back();
+            
+        }
+    }
+    robotstate_ = robotstate_bar_;
+    robotstate_past_ = robotstate_;
+    // finish once ekf, change the flag
+    if_new_obstacles_ = false;
 
 
 }
@@ -63,14 +117,15 @@ double Ekf::angleLimitChecking(double theta){
     }
     return theta;
 }
-void Ekf::cartesianToPolar(){
-
+Eigen::Vector3d cartesianToPolar(Eigen::Vector2d point, Eigen::Vector3d origin){
+    
 }
 
 void Ekf::odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg){
     const ros::Time stamp = ros::Time::now() + ros::Duration(0.2);
     double v = odom_msg->twist.twist.linear.x;
     double w = odom_msg->twist.twist.angular.z;
+    // cout << "v: " << v << "w: " << w << endl;
     predict_diff(v, w);
     update();
     publishEkfPose(stamp); // stamp = acturally when does tf been generated
@@ -121,7 +176,7 @@ void Ekf::broadcastEkfTransform(const nav_msgs::Odometry::ConstPtr& odom_msg){
         tf2::Quaternion(0, 0, odom_msg->pose.pose.orientation.z, odom_msg->pose.pose.orientation.w),
         tf2::Vector3(odom_msg->pose.pose.position.x, odom_msg->pose.pose.position.y, 0)
     );
-    tf2::Transform map_to_odom = odom_to_baseft.inverse()*map_to_baseft;
+    tf2::Transform map_to_odom = map_to_baseft*odom_to_baseft.inverse();
 
     geometry_msgs::TransformStamped transformStamped;
     transformStamped.header.stamp = odom_msg->header.stamp;
@@ -136,6 +191,7 @@ int main(int argc, char** argv){
     ros::NodeHandle nh;
     Ekf ekf(nh);
     ekf.initialize();
+
     while(ros::ok()){
         ros::spin();
     }

@@ -31,7 +31,7 @@ class Ekf{
         // several util function
         double euclideanDistance(Eigen::Vector3d a, Eigen::Vector3d b);
         double angleLimitChecking(double theta);
-        void cartesianToPolar();
+        Eigen::Vector3d cartesianToPolar(Eigen::Vector2d point, Eigen::Vector3d origin);
         double degToRad(double deg){ return deg*M_PI/180.0 ;}
         // for ros
         void odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg);
@@ -52,6 +52,18 @@ class Ekf{
         RobotState robotstate_bar_;
         RobotState robotstate_;
         double dt_;
+
+        // ekf parameter
+        // motion covariance
+        double a1_;
+        double a2_;
+        double a3_;
+        double a4_;
+        // measure noise
+        Eigen::DiagonalMatrix<double, 3> Q_;
+        // set minimum likelihood value
+        double mini_likelihood_;
+
 
         // ros parameter
         std::string p_robot_name_;
