@@ -41,6 +41,10 @@ void Ekf::initialize(){
     odom_sub_ = nh_.subscribe(p_robot_name_+"odom", 50, &Ekf::odomCallback, this);
     raw_obstacles_sub_ = nh_.subscribe(p_robot_name_+"raw_obstacles", 10, &Ekf::obstaclesCallback, this);
     ekf_pose_pub_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>(p_robot_name_+"ekf_pose", 10);  
+
+    // for time calculate
+    count_ = 0;
+    duration_ = 0.0;
 }
 
 void Ekf::predict_diff(double v, double w){
@@ -191,8 +195,18 @@ void Ekf::odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg){
     double v = odom_msg->twist.twist.linear.x;
     double w = odom_msg->twist.twist.angular.z;
     // cout << "v: " << v << "w: " << w << endl;
+    // for calculate time cost
+    // struct timespec tt1, tt2;
+    // clock_gettime(CLOCK_REALTIME, &tt1);
+
     predict_diff(v, w);
     update();
+
+    // clock_gettime(CLOCK_REALTIME, &tt2);
+    // count_ += 1;
+    // duration_ += (tt2.tv_nsec-tt1.tv_nsec)*1e-9;
+    // cout << "average time cost is " << duration_/count_ << "s" << endl;
+
     publishEkfPose(stamp); // stamp = acturally when does tf been generated
     broadcastEkfTransform(odom_msg); // stamp = odom.stamp so frequency = odom's frequency
 }

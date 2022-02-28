@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import numpy as np
+import time
 
 # for ros
 import rospy
@@ -45,8 +46,13 @@ class EKF:
         
         self.map_frame_name = "map"
         self.robot_frame_name = "base_footprint"
+
+        # for time calculate
+        self.index = 0
+        self.duration = 0.0
         
     def ekf_localization(self, v, w):
+        begin = time.clock_gettime_ns(time.CLOCK_REALTIME)
         # set motion covariance
         a1 = 0.5
         a2 = 0.8
@@ -142,6 +148,10 @@ class EKF:
         self.sigma_past = self.sigma.copy()
         # finish once ekf, change the flag
         self.if_new_obstacles = False
+        end = time.clock_gettime_ns(time.CLOCK_REALTIME)
+        self.index += 1
+        self.duration += end-begin
+        print("ekf cost:", self.duration/self.index*1e-9 , "sec")
 
     def _euclidean_distance(self, a, b):
         return np.sqrt((b[1, 0]-a[1, 0])**2 + (b[0, 0]-a[0, 0])**2)

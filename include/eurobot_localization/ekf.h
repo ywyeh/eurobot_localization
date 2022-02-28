@@ -1,5 +1,6 @@
 #include <ros/ros.h>
 #include <ros/console.h>
+#include <time.h>
 // tf2
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_ros/transform_broadcaster.h>
@@ -82,4 +83,7 @@ class Ekf{
         ros::Publisher ekf_pose_pub_;
         tf2_ros::TransformBroadcaster br_;
 
+        // for function time calculation
+        int count_;
+        double duration_;
 };
