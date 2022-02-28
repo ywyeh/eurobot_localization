@@ -13,9 +13,7 @@ void Ekf::initialize(){
     Eigen::Vector2d beacon_b {1.05, -0.1};
     Eigen::Vector2d beacon_c {1.95,  3.1};
     beacon_in_map_ = {beacon_a, beacon_b, beacon_c};
-    // for (Eigen::Vector2d n : beacon_in_map_){
-    //     cout << n;
-    // }
+
     // for robot state
     mu_0_ << p_initial_x_, p_initial_y_, degToRad(p_initial_theta_deg_);
     robotstate_past_.mu = mu_0_;
@@ -32,7 +30,8 @@ void Ekf::initialize(){
     a3_ = 0.5;
     a4_ = 0.8;
     Q_ = Eigen::Vector3d{0.001, 0.2, 0.02}.asDiagonal();
-    mini_likelihood_ = 0.5;
+    mini_likelihood_ = -100;
+    mini_likelihood_update_ = 0.5;
 
     // for beacon piller detection
     if_new_obstacles_ = false;
@@ -91,23 +90,64 @@ void Ekf::predict_ormi(double v, double w){
 void Ekf::update(){
     // ekf update step:
     if(if_new_obstacles_){
-        while(!beacon_from_scan_.empty()){
+        // cout << "beacon: " << endl;
+        while(!beacon_from_scan_.empty()){ // for all scanned beacon 
             Eigen::Vector2d landmark_scan = beacon_from_scan_.back();
             beacon_from_scan_.pop_back();
-            
+            // transfer landmark_scan type from (x, y) to (r, phi)
+            Eigen::Vector3d z_i = cartesianToPolar(landmark_scan, Eigen::Vector3d(0,0,0));
+            // cout << "z_i: " << z_i << endl;
+            double j_max = mini_likelihood_;
+            Eigen::Vector3d z_j_max;
+            Eigen::Matrix3d H_j_max;
+            Eigen::Matrix3d S_j_max;
+
+            // cout << "beacon: " << endl;
+
+            for (Eigen::Vector2d landmark_k : beacon_in_map_){ // for all beacon in map
+                double j_k;
+                Eigen::Vector3d z_k;
+                Eigen::Matrix3d H_k;
+                Eigen::Matrix3d S_k;
+                std::tie(z_k, H_k) = cartesianToPolarWithH(landmark_k, robotstate_bar_.mu);
+                S_k = H_k*robotstate_bar_.sigma*H_k.transpose() + Eigen::Matrix3d(Q_);
+                try{
+                    // original 
+                    // j_k = 1/sqrt((2*M_PI*S_k).determinant()) * exp(-0.5*(z_i-z_k).transpose()*S_k.inverse()*(z_i-z_k));
+                    // ln(j_k()) version
+                    j_k = -0.5*(z_i-z_k).transpose()*S_k.inverse()*(z_i-z_k) - log(sqrt((2*M_PI*S_k).determinant()));
+                    // cout << j_k << endl;
+                    if(j_k>j_max){
+                        j_max = j_k;
+                        z_j_max = z_k;
+                        H_j_max = H_k;
+                        S_j_max = S_k;
+                    }
+                }
+                catch(const std::exception& e){
+                    ROS_ERROR("%s", e.what());
+                    // std::cerr << e.what() << '\n';
+                }
+            }
+            // TODO onlu update three time or something could increase robustness
+            if(j_max > mini_likelihood_update_){
+                Eigen::Matrix3d K_i;
+                K_i = robotstate_bar_.sigma*H_j_max.transpose()*S_j_max.inverse();
+                robotstate_bar_.mu += K_i*(z_i-z_j_max);
+                robotstate_bar_.sigma = (Eigen::Matrix3d::Identity() - K_i*H_j_max)*robotstate_bar_.sigma;
+            }
         }
     }
     robotstate_ = robotstate_bar_;
     robotstate_past_ = robotstate_;
     // finish once ekf, change the flag
     if_new_obstacles_ = false;
-
-
 }
 
-double Ekf::euclideanDistance(Eigen::Vector3d a, Eigen::Vector3d b){
-    return sqrt(pow((b[0]-a[0]), 2) + pow((b[1]-a[1]), 2));
+double Ekf::euclideanDistance(Eigen::Vector2d a, Eigen::Vector3d b){
+    return sqrt(pow((b(0)-a(0)), 2) + pow((b(1)-a(1)), 2));
 }
+
 double Ekf::angleLimitChecking(double theta){
     if(theta > M_PI){
         theta -= M_PI*2;
@@ -117,8 +157,33 @@ double Ekf::angleLimitChecking(double theta){
     }
     return theta;
 }
-Eigen::Vector3d cartesianToPolar(Eigen::Vector2d point, Eigen::Vector3d origin){
-    
+
+Eigen::Vector3d Ekf::cartesianToPolar(Eigen::Vector2d point, Eigen::Vector3d origin){
+    // transpose point from cartesian to polar with given origin
+    double q_sqrt = euclideanDistance(point, origin);
+    double q = pow(q_sqrt, 2);
+    double dx = point(0)-origin(0);
+    double dy = point(1)-origin(1);
+    Eigen::Vector3d z;
+    z << q_sqrt, atan2(dy, dx) - origin(2), 1.0;
+    z(1) = angleLimitChecking(z(1));
+    return z;
+}
+
+std::tuple<Eigen::Vector3d, Eigen::Matrix3d> Ekf::cartesianToPolarWithH(Eigen::Vector2d point, Eigen::Vector3d origin){
+    // transpose point from cartesian to polar with given origin
+    double q_sqrt = euclideanDistance(point, origin);
+    double q = pow(q_sqrt, 2);
+    double dx = point(0)-origin(0);
+    double dy = point(1)-origin(1);
+    Eigen::Vector3d z;
+    Eigen::Matrix3d H;
+    z << q_sqrt, atan2(dy, dx) - origin(2), 1.0;
+    z(1) = angleLimitChecking(z(1));
+    H << -(dx/q_sqrt), -(dy/q_sqrt),  0,
+                 dy/q,        -dx/q, -1,
+                    0,            0,  0;
+    return std::make_tuple(z, H);
 }
 
 void Ekf::odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg){
@@ -139,6 +204,7 @@ void Ekf::obstaclesCallback(const obstacle_detector::Obstacles::ConstPtr& obstac
         obstacle_detector::CircleObstacle circle = obstacle_msg->circles[i];
         // TODO filter out those obstacles radius do not meet the beacon pillar
         Eigen::Vector2d xy(circle.center.x, circle.center.y);
+        // cout << xy << endl;
         beacon_from_scan_.push_back(xy);
     }
     if_new_obstacles_ = true;

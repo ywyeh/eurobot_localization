@@ -28,11 +28,14 @@ class Ekf{
         void predict_diff(double v, double w);
         void predict_ormi(double v, double w);
         void update();
+
         // several util function
-        double euclideanDistance(Eigen::Vector3d a, Eigen::Vector3d b);
+        double euclideanDistance(Eigen::Vector2d a, Eigen::Vector3d b);
         double angleLimitChecking(double theta);
         Eigen::Vector3d cartesianToPolar(Eigen::Vector2d point, Eigen::Vector3d origin);
+        std::tuple<Eigen::Vector3d, Eigen::Matrix3d> cartesianToPolarWithH(Eigen::Vector2d point, Eigen::Vector3d origin);
         double degToRad(double deg){ return deg*M_PI/180.0 ;}
+        
         // for ros
         void odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg);
         void obstaclesCallback(const obstacle_detector::Obstacles::ConstPtr& obstacle_msg);
@@ -63,6 +66,7 @@ class Ekf{
         Eigen::DiagonalMatrix<double, 3> Q_;
         // set minimum likelihood value
         double mini_likelihood_;
+        double mini_likelihood_update_;
 
 
         // ros parameter
