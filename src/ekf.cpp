@@ -14,6 +14,9 @@ void Ekf::initialize(){
     Eigen::Vector2d beacon_c {1.95,  3.1};
     beacon_in_map_ = {beacon_a, beacon_b, beacon_c};
 
+    // for debug
+    update_beacon_ = {Eigen::Vector2d(0.0,0.0),Eigen::Vector2d(0.0,0.0),Eigen::Vector2d(0.0,0.0)};
+
     // for robot state
     mu_0_ << p_initial_x_, p_initial_y_, degToRad(p_initial_theta_deg_);
     robotstate_past_.mu = mu_0_;
@@ -26,12 +29,16 @@ void Ekf::initialize(){
 
     // ekf parameter
     a1_ = 0.5;
-    a2_ = 0.8;
+    a2_ = 1.0;
     a3_ = 0.5;
-    a4_ = 0.8;
+    a4_ = 1.0;
     Q_ = Eigen::Vector3d{0.001, 0.2, 0.02}.asDiagonal();
-    mini_likelihood_ = -100;
-    mini_likelihood_update_ = 0.5;
+    // use log(j_k)
+    mini_likelihood_ = -100.0; 
+    mini_likelihood_update_ = 2.0;
+    // use j_k
+    // mini_likelihood_ = 0.0; 
+    // mini_likelihood_update_ = 25.0;
 
     // for beacon piller detection
     if_new_obstacles_ = false;
@@ -40,7 +47,8 @@ void Ekf::initialize(){
     // for ros
     odom_sub_ = nh_.subscribe(p_robot_name_+"odom", 50, &Ekf::odomCallback, this);
     raw_obstacles_sub_ = nh_.subscribe(p_robot_name_+"raw_obstacles", 10, &Ekf::obstaclesCallback, this);
-    ekf_pose_pub_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>(p_robot_name_+"ekf_pose", 10);  
+    ekf_pose_pub_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>(p_robot_name_+"ekf_pose", 10);
+    update_beacon_pub_ = nh_.advertise<obstacle_detector::Obstacles>(p_robot_name_+"update_beacon", 10);
 
     // for time calculate
     count_ = 0;
@@ -128,9 +136,9 @@ void Ekf::update(){
                 S_k = H_k*robotstate_bar_.sigma*H_k.transpose() + Eigen::Matrix3d(Q_);
                 try{
                     // original 
-                    // j_k = 1/sqrt((2*M_PI*S_k).determinant()) * exp(-0.5*(z_i-z_k).transpose()*S_k.inverse()*(z_i-z_k));
+                    j_k = 1/sqrt((2*M_PI*S_k).determinant()) * exp(-0.5*(z_i-z_k).transpose()*S_k.inverse()*(z_i-z_k));
                     // ln(j_k()) version
-                    j_k = -0.5*(z_i-z_k).transpose()*S_k.inverse()*(z_i-z_k) - log(sqrt((2*M_PI*S_k).determinant()));
+                    // j_k = -0.5*(z_i-z_k).transpose()*S_k.inverse()*(z_i-z_k) - log(sqrt((2*M_PI*S_k).determinant()));
                     // cout << j_k << endl;
                     if(j_k>j_max){
                         j_max = j_k;
@@ -146,7 +154,6 @@ void Ekf::update(){
                 }
                 k += 1;
             }
-            // TODO only update three time or something could increase robustness
             // if(j_max > mini_likelihood_update_){
             //     Eigen::Matrix3d K_i;
             //     K_i = robotstate_bar_.sigma*H_j_max.transpose()*S_j_max.inverse();
@@ -154,6 +161,7 @@ void Ekf::update(){
             //     robotstate_bar_.sigma = (Eigen::Matrix3d::Identity() - K_i*H_j_max)*robotstate_bar_.sigma;
             // }
 
+            // TODO only update three time but now it might update wrong beacon pillar
             // for the 3 beacon pillars, take out the largest 3 j value and z, H, S matrix
             if(j_max > j_beacon_max[k_max]){ 
                 j_beacon_max[k_max] = j_max;
@@ -161,14 +169,21 @@ void Ekf::update(){
                 z_i_beacon_max[k_max] = z_i;
                 H_j_beacon_max[k_max] = H_j_max;
                 S_j_beacon_max[k_max] = S_j_max;
+                // for debug
+                update_beacon_[k_max] = landmark_scan;
             }
         }
         for(int i = 0; i < 3; i++){
             if(j_beacon_max[i] > mini_likelihood_update_){
+                cout << "update, j = " << j_beacon_max[i] << endl;
                 Eigen::Matrix3d K_i;
                 K_i = robotstate_bar_.sigma*H_j_beacon_max[i].transpose()*S_j_beacon_max[i].inverse();
                 robotstate_bar_.mu += K_i*(z_i_beacon_max[i]-z_j_beacon_max[i]);
                 robotstate_bar_.sigma = (Eigen::Matrix3d::Identity() - K_i*H_j_beacon_max[i])*robotstate_bar_.sigma;
+            }
+            else{
+                update_beacon_[i] =  Eigen::Vector2d(-1, -1);
+                cout << "didn't update, j = " << j_beacon_max[i] << endl;
             }
         }
     }
@@ -226,18 +241,19 @@ void Ekf::odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg){
     double w = odom_msg->twist.twist.angular.z;
     // cout << "v: " << v << "w: " << w << endl;
     // for calculate time cost
-    struct timespec tt1, tt2;
-    clock_gettime(CLOCK_REALTIME, &tt1);
+    // struct timespec tt1, tt2;
+    // clock_gettime(CLOCK_REALTIME, &tt1);
 
     predict_diff(v, w);
     update();
 
-    clock_gettime(CLOCK_REALTIME, &tt2);
-    count_ += 1;
-    duration_ += (tt2.tv_nsec-tt1.tv_nsec)*1e-9;
-    cout << "average time cost is " << duration_/count_ << "s" << endl;
+    // clock_gettime(CLOCK_REALTIME, &tt2);
+    // count_ += 1;
+    // duration_ += (tt2.tv_nsec-tt1.tv_nsec)*1e-9;
+    // cout << "average time cost is " << duration_/count_ << "s" << endl;
 
     publishEkfPose(stamp); // stamp = acturally when does tf been generated
+    publishUpdateBeacon(stamp);
     broadcastEkfTransform(odom_msg); // stamp = odom.stamp so frequency = odom's frequency
 }
 
@@ -294,6 +310,21 @@ void Ekf::broadcastEkfTransform(const nav_msgs::Odometry::ConstPtr& odom_msg){
     transformStamped.child_frame_id = p_robot_name_+"odom";
     transformStamped.transform = tf2::toMsg(map_to_odom);
     br_.sendTransform(transformStamped);
+}
+
+void Ekf::publishUpdateBeacon(const ros::Time& stamp){
+    obstacle_detector::Obstacles update_obstacles;
+    for(Eigen::Vector2d o : update_beacon_){
+        if(o(0) == -1) continue;
+        obstacle_detector::CircleObstacle circle;
+        circle.center.x = o(0);
+        circle.center.y = o(1);
+        circle.radius = 0.35;
+        circle.true_radius = 0.05;
+        update_obstacles.circles.push_back(circle);
+    }
+    update_obstacles.header.frame_id = p_robot_name_+"base_footprint";
+    update_beacon_pub_.publish(update_obstacles);
 }
 
 int main(int argc, char** argv){

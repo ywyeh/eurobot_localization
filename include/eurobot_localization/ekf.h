@@ -41,6 +41,7 @@ class Ekf{
         void odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg);
         void obstaclesCallback(const obstacle_detector::Obstacles::ConstPtr& obstacle_msg);
         void publishEkfPose(const ros::Time& stamp);
+        void publishUpdateBeacon(const ros::Time& stamp);
         void broadcastEkfTransform(const nav_msgs::Odometry::ConstPtr& odom_msg);
 
         // for beacon position in map std::list<double>{ax, ay, bx, by, cx, cy}
@@ -49,6 +50,9 @@ class Ekf{
         // for beacon piller detection
         bool if_new_obstacles_;
         std::list<Eigen::Vector2d> beacon_from_scan_;
+
+        // for debug
+        std::vector<Eigen::Vector2d> update_beacon_;
 
         // for robot state
         Eigen::Vector3d mu_0_;
@@ -82,6 +86,8 @@ class Ekf{
         ros::Subscriber raw_obstacles_sub_;
         ros::Publisher ekf_pose_pub_;
         tf2_ros::TransformBroadcaster br_;
+        // for debug
+        ros::Publisher update_beacon_pub_;
 
         // for function time calculation
         int count_;
