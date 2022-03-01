@@ -175,7 +175,7 @@ void Ekf::update(){
         }
         for(int i = 0; i < 3; i++){
             if(j_beacon_max[i] > mini_likelihood_update_){
-                cout << "update, j = " << j_beacon_max[i] << endl;
+                // cout << "update, j = " << j_beacon_max[i] << endl;
                 Eigen::Matrix3d K_i;
                 K_i = robotstate_bar_.sigma*H_j_beacon_max[i].transpose()*S_j_beacon_max[i].inverse();
                 robotstate_bar_.mu += K_i*(z_i_beacon_max[i]-z_j_beacon_max[i]);
@@ -183,7 +183,7 @@ void Ekf::update(){
             }
             else{
                 update_beacon_[i] =  Eigen::Vector2d(-1, -1);
-                cout << "didn't update, j = " << j_beacon_max[i] << endl;
+                // cout << "didn't update, j = " << j_beacon_max[i] << endl;
             }
         }
     }
@@ -194,6 +194,10 @@ void Ekf::update(){
 }
 
 double Ekf::euclideanDistance(Eigen::Vector2d a, Eigen::Vector3d b){
+    return sqrt(pow((b(0)-a(0)), 2) + pow((b(1)-a(1)), 2));
+}
+
+double Ekf::euclideanDistance(Eigen::Vector2d a, Eigen::Vector2d b){
     return sqrt(pow((b(0)-a(0)), 2) + pow((b(1)-a(1)), 2));
 }
 
@@ -235,6 +239,15 @@ std::tuple<Eigen::Vector3d, Eigen::Matrix3d> Ekf::cartesianToPolarWithH(Eigen::V
     return std::make_tuple(z, H);
 }
 
+Eigen::Vector2d Ekf::tfBasefpToMap(Eigen::Vector2d point, Eigen::Vector3d robot_pose){
+    double s = sin(robot_pose(2));
+    double c = cos(robot_pose(2));
+    Eigen::Matrix2d rotation_mat;
+    rotation_mat << c,-s,s,c;
+    Eigen::Vector2d point_map = rotation_mat * point + Eigen::Vector2d{robot_pose(0), robot_pose(1)};
+    return point_map;
+}
+
 void Ekf::odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg){
     const ros::Time stamp = ros::Time::now() + ros::Duration(0.2);
     double v = odom_msg->twist.twist.linear.x;
@@ -260,12 +273,21 @@ void Ekf::odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg){
 void Ekf::obstaclesCallback(const obstacle_detector::Obstacles::ConstPtr& obstacle_msg){
     if_new_obstacles_ = false;
     beacon_from_scan_.clear(); // drop out all element in list
+    // cout << "obstacle to map frame is: " << endl;
     for(int i = 0; i < obstacle_msg->circles.size(); i++){
         obstacle_detector::CircleObstacle circle = obstacle_msg->circles[i];
-        // TODO filter out those obstacles radius do not meet the beacon pillar
         Eigen::Vector2d xy(circle.center.x, circle.center.y);
+        Eigen::Vector2d xy_map = tfBasefpToMap(xy, robotstate_.mu);
+        // filter out those obstacles position do not close the beacon pillar on map
+        for(auto const& i : beacon_in_map_){
+            double distance = euclideanDistance(xy_map, i);
+            if(distance < 0.1){
+                // cout << xy_map << endl;
+                beacon_from_scan_.push_back(xy);
+            }
+        }
         // cout << xy << endl;
-        beacon_from_scan_.push_back(xy);
+        // beacon_from_scan_.push_back(xy);
     }
     if_new_obstacles_ = true;
 }
