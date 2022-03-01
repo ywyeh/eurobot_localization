@@ -95,6 +95,15 @@ void Ekf::update(){
     // ekf update step:
     if(if_new_obstacles_){
         // cout << "beacon: " << endl;
+        // vector of the max j_max for each beacon
+        vector<double> j_beacon_max = {mini_likelihood_, mini_likelihood_, mini_likelihood_};
+        vector<Eigen::Vector3d> z_j_beacon_max = {Eigen::Vector3d(0.0,0.0,0.0),Eigen::Vector3d(0.0,0.0,0.0),Eigen::Vector3d(0.0,0.0,0.0)};
+        vector<Eigen::Vector3d> z_i_beacon_max = {Eigen::Vector3d(0.0,0.0,0.0),Eigen::Vector3d(0.0,0.0,0.0),Eigen::Vector3d(0.0,0.0,0.0)};
+        // cout << z_j_beacon_max[0] << z_j_beacon_max[1] << z_j_beacon_max[2] << endl;
+        Eigen::Matrix3d zero_mat = Eigen::Matrix3d(Eigen::Vector3d{0.0, 0.0, 0.0}.asDiagonal());
+        vector<Eigen::Matrix3d> H_j_beacon_max = {zero_mat, zero_mat, zero_mat};
+        vector<Eigen::Matrix3d> S_j_beacon_max = {zero_mat, zero_mat, zero_mat};
+
         while(!beacon_from_scan_.empty()){ // for all scanned beacon 
             Eigen::Vector2d landmark_scan = beacon_from_scan_.back();
             beacon_from_scan_.pop_back();
@@ -102,6 +111,8 @@ void Ekf::update(){
             Eigen::Vector3d z_i = cartesianToPolar(landmark_scan, Eigen::Vector3d(0,0,0));
             // cout << "z_i: " << z_i << endl;
             double j_max = mini_likelihood_;
+            int k_max = 0;
+            int k = 0;
             Eigen::Vector3d z_j_max;
             Eigen::Matrix3d H_j_max;
             Eigen::Matrix3d S_j_max;
@@ -123,6 +134,7 @@ void Ekf::update(){
                     // cout << j_k << endl;
                     if(j_k>j_max){
                         j_max = j_k;
+                        k_max = k;
                         z_j_max = z_k;
                         H_j_max = H_k;
                         S_j_max = S_k;
@@ -132,13 +144,31 @@ void Ekf::update(){
                     ROS_ERROR("%s", e.what());
                     // std::cerr << e.what() << '\n';
                 }
+                k += 1;
             }
-            // TODO onlu update three time or something could increase robustness
-            if(j_max > mini_likelihood_update_){
+            // TODO only update three time or something could increase robustness
+            // if(j_max > mini_likelihood_update_){
+            //     Eigen::Matrix3d K_i;
+            //     K_i = robotstate_bar_.sigma*H_j_max.transpose()*S_j_max.inverse();
+            //     robotstate_bar_.mu += K_i*(z_i-z_j_max);
+            //     robotstate_bar_.sigma = (Eigen::Matrix3d::Identity() - K_i*H_j_max)*robotstate_bar_.sigma;
+            // }
+
+            // for the 3 beacon pillars, take out the largest 3 j value and z, H, S matrix
+            if(j_max > j_beacon_max[k_max]){ 
+                j_beacon_max[k_max] = j_max;
+                z_j_beacon_max[k_max] = z_j_max;
+                z_i_beacon_max[k_max] = z_i;
+                H_j_beacon_max[k_max] = H_j_max;
+                S_j_beacon_max[k_max] = S_j_max;
+            }
+        }
+        for(int i = 0; i < 3; i++){
+            if(j_beacon_max[i] > mini_likelihood_update_){
                 Eigen::Matrix3d K_i;
-                K_i = robotstate_bar_.sigma*H_j_max.transpose()*S_j_max.inverse();
-                robotstate_bar_.mu += K_i*(z_i-z_j_max);
-                robotstate_bar_.sigma = (Eigen::Matrix3d::Identity() - K_i*H_j_max)*robotstate_bar_.sigma;
+                K_i = robotstate_bar_.sigma*H_j_beacon_max[i].transpose()*S_j_beacon_max[i].inverse();
+                robotstate_bar_.mu += K_i*(z_i_beacon_max[i]-z_j_beacon_max[i]);
+                robotstate_bar_.sigma = (Eigen::Matrix3d::Identity() - K_i*H_j_beacon_max[i])*robotstate_bar_.sigma;
             }
         }
     }
@@ -196,16 +226,16 @@ void Ekf::odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg){
     double w = odom_msg->twist.twist.angular.z;
     // cout << "v: " << v << "w: " << w << endl;
     // for calculate time cost
-    // struct timespec tt1, tt2;
-    // clock_gettime(CLOCK_REALTIME, &tt1);
+    struct timespec tt1, tt2;
+    clock_gettime(CLOCK_REALTIME, &tt1);
 
     predict_diff(v, w);
     update();
 
-    // clock_gettime(CLOCK_REALTIME, &tt2);
-    // count_ += 1;
-    // duration_ += (tt2.tv_nsec-tt1.tv_nsec)*1e-9;
-    // cout << "average time cost is " << duration_/count_ << "s" << endl;
+    clock_gettime(CLOCK_REALTIME, &tt2);
+    count_ += 1;
+    duration_ += (tt2.tv_nsec-tt1.tv_nsec)*1e-9;
+    cout << "average time cost is " << duration_/count_ << "s" << endl;
 
     publishEkfPose(stamp); // stamp = acturally when does tf been generated
     broadcastEkfTransform(odom_msg); // stamp = odom.stamp so frequency = odom's frequency
