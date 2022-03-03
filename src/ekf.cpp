@@ -34,8 +34,8 @@ void Ekf::initialize(){
     a4_ = 1.0;
     Q_ = Eigen::Vector3d{0.001, 0.2, 0.02}.asDiagonal();
     // use log(j_k)
-    mini_likelihood_ = -100.0; 
-    mini_likelihood_update_ = 2.0;
+    mini_likelihood_ = 0.0; 
+    mini_likelihood_update_ = 0.1;
     // use j_k
     // mini_likelihood_ = 0.0; 
     // mini_likelihood_update_ = 25.0;
@@ -45,10 +45,10 @@ void Ekf::initialize(){
     beacon_from_scan_ = {};
 
     // for ros
-    odom_sub_ = nh_.subscribe(p_robot_name_+"odom", 50, &Ekf::odomCallback, this);
-    raw_obstacles_sub_ = nh_.subscribe(p_robot_name_+"raw_obstacles", 10, &Ekf::obstaclesCallback, this);
-    ekf_pose_pub_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>(p_robot_name_+"ekf_pose", 10);
-    update_beacon_pub_ = nh_.advertise<obstacle_detector::Obstacles>(p_robot_name_+"update_beacon", 10);
+    odom_sub_ = nh_.subscribe("odom", 50, &Ekf::odomCallback, this);
+    raw_obstacles_sub_ = nh_.subscribe("raw_obstacles", 10, &Ekf::obstaclesCallback, this);
+    ekf_pose_pub_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("ekf_pose", 10);
+    update_beacon_pub_ = nh_.advertise<obstacle_detector::Obstacles>("update_beacon", 10);
 
     // for time calculate
     count_ = 0;
@@ -278,10 +278,14 @@ void Ekf::obstaclesCallback(const obstacle_detector::Obstacles::ConstPtr& obstac
         obstacle_detector::CircleObstacle circle = obstacle_msg->circles[i];
         Eigen::Vector2d xy(circle.center.x, circle.center.y);
         Eigen::Vector2d xy_map = tfBasefpToMap(xy, robotstate_.mu);
+        // filter out those obstacles radius bigger than 0.1m
+        // if(circle.true_radius >= 0.1){
+        //     continue;
+        // }
         // filter out those obstacles position do not close the beacon pillar on map
         for(auto const& i : beacon_in_map_){
             double distance = euclideanDistance(xy_map, i);
-            if(distance < 0.1){
+            if(distance < 0.1){ // alst time in real world experience we take < 0.5
                 // cout << xy_map << endl;
                 beacon_from_scan_.push_back(xy);
             }
@@ -329,7 +333,7 @@ void Ekf::broadcastEkfTransform(const nav_msgs::Odometry::ConstPtr& odom_msg){
     geometry_msgs::TransformStamped transformStamped;
     transformStamped.header.stamp = odom_msg->header.stamp;
     transformStamped.header.frame_id = "map";
-    transformStamped.child_frame_id = p_robot_name_+"odom";
+    transformStamped.child_frame_id = p_robot_name_+"/odom";
     transformStamped.transform = tf2::toMsg(map_to_odom);
     br_.sendTransform(transformStamped);
 }
@@ -345,7 +349,7 @@ void Ekf::publishUpdateBeacon(const ros::Time& stamp){
         circle.true_radius = 0.05;
         update_obstacles.circles.push_back(circle);
     }
-    update_obstacles.header.frame_id = p_robot_name_+"base_footprint";
+    update_obstacles.header.frame_id = p_robot_name_+"/base_footprint";
     update_beacon_pub_.publish(update_obstacles);
 }
 
