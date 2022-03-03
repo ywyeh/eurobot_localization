@@ -32,14 +32,14 @@ void Ekf::initialize(){
     dt_ = 1.0/50.0;
 
     // ekf parameter
-    a1_ = 0.5;
-    a2_ = 1.0;
-    a3_ = 0.5;
-    a4_ = 1.0;
-    Q_ = Eigen::Vector3d{0.001, 0.2, 0.02}.asDiagonal();
+    a1_ = 1.5;
+    a2_ = 2.5;
+    a3_ = 1.5;
+    a4_ = 2.5;
+    Q_ = Eigen::Vector3d{0.01, 0.01, 0.02}.asDiagonal();
     // use log(j_k)
-    mini_likelihood_ = 0.0; 
-    mini_likelihood_update_ = 0.1;
+    mini_likelihood_ = -10000.0; 
+    mini_likelihood_update_ = 0.4;
     // use j_k
     // mini_likelihood_ = 0.0; 
     // mini_likelihood_update_ = 25.0;
@@ -71,7 +71,6 @@ void Ekf::predict_diff(double v, double w){
     Eigen::Matrix3d G;
     Eigen::Matrix<double, 3, 2> V; 
     Eigen::Matrix2d M;
-    
 
     if((w < 0.00001) && (w > -0.00001)){
         G << 1.0, 0.0, -v*s*dt_,
@@ -140,9 +139,9 @@ void Ekf::update(){
                 S_k = H_k*robotstate_bar_.sigma*H_k.transpose() + Eigen::Matrix3d(Q_);
                 try{
                     // original 
-                    j_k = 1/sqrt((2*M_PI*S_k).determinant()) * exp(-0.5*(z_i-z_k).transpose()*S_k.inverse()*(z_i-z_k));
+                    // j_k = 1/sqrt((2*M_PI*S_k).determinant()) * exp(-0.5*(safeMinusTheta(z_i, z_k)).transpose()*S_k.inverse()*(safeMinusTheta(z_i, z_k)));
                     // ln(j_k()) version
-                    // j_k = -0.5*(z_i-z_k).transpose()*S_k.inverse()*(z_i-z_k) - log(sqrt((2*M_PI*S_k).determinant()));
+                    j_k = -0.5*safeMinusTheta(z_i, z_k).transpose()*S_k.inverse()*(safeMinusTheta(z_i, z_k)) - log(sqrt((2*M_PI*S_k).determinant()));
                     // cout << j_k << endl;
                     if(j_k>j_max){
                         j_max = j_k;
@@ -165,7 +164,7 @@ void Ekf::update(){
             //     robotstate_bar_.sigma = (Eigen::Matrix3d::Identity() - K_i*H_j_max)*robotstate_bar_.sigma;
             // }
 
-            // TODO only update three time but now it might update wrong beacon pillar
+            // only update three time but now it might update wrong beacon pillar
             // for the 3 beacon pillars, take out the largest 3 j value and z, H, S matrix
             if(j_max > j_beacon_max[k_max]){ 
                 j_beacon_max[k_max] = j_max;
@@ -182,7 +181,7 @@ void Ekf::update(){
                 // cout << "update, j = " << j_beacon_max[i] << endl;
                 Eigen::Matrix3d K_i;
                 K_i = robotstate_bar_.sigma*H_j_beacon_max[i].transpose()*S_j_beacon_max[i].inverse();
-                robotstate_bar_.mu += K_i*(z_i_beacon_max[i]-z_j_beacon_max[i]);
+                robotstate_bar_.mu += K_i*(safeMinusTheta(z_i_beacon_max[i], z_j_beacon_max[i]));
                 robotstate_bar_.sigma = (Eigen::Matrix3d::Identity() - K_i*H_j_beacon_max[i])*robotstate_bar_.sigma;
             }
             else{
@@ -213,6 +212,12 @@ double Ekf::angleLimitChecking(double theta){
         theta += M_PI*2;
     }
     return theta;
+}
+
+Eigen::Vector3d Ekf:: safeMinusTheta(Eigen::Vector3d a, Eigen::Vector3d b){
+    Eigen::Vector3d a_minus_b = a - b;
+    a_minus_b(2) = angleLimitChecking(a_minus_b(2));
+    return a_minus_b;
 }
 
 Eigen::Vector3d Ekf::cartesianToPolar(Eigen::Vector2d point, Eigen::Vector3d origin){
@@ -289,7 +294,7 @@ void Ekf::obstaclesCallback(const obstacle_detector::Obstacles::ConstPtr& obstac
         // filter out those obstacles position do not close the beacon pillar on map
         for(auto const& i : beacon_in_map_){
             double distance = euclideanDistance(xy_map, i);
-            if(distance < 0.1){ // alst time in real world experience we take < 0.5
+            if(distance < 0.5){ // alst time in real world experience we take < 0.5
                 // cout << xy_map << endl;
                 beacon_from_scan_.push_back(xy);
             }
@@ -353,7 +358,8 @@ void Ekf::publishUpdateBeacon(const ros::Time& stamp){
         circle.true_radius = 0.05;
         update_obstacles.circles.push_back(circle);
     }
-    update_obstacles.header.frame_id = p_robot_name_+"/base_footprint";
+    if(p_robot_name_=="") update_obstacles.header.frame_id = "base_footprint";
+    else update_obstacles.header.frame_id = p_robot_name_+"/base_footprint";
     update_beacon_pub_.publish(update_obstacles);
 }
 

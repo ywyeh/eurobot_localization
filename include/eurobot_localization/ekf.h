@@ -34,6 +34,7 @@ class Ekf{
         double euclideanDistance(Eigen::Vector2d a, Eigen::Vector3d b);
         double euclideanDistance(Eigen::Vector2d a, Eigen::Vector2d b);
         double angleLimitChecking(double theta);
+        Eigen::Vector3d safeMinusTheta(Eigen::Vector3d a, Eigen::Vector3d b);
         Eigen::Vector3d cartesianToPolar(Eigen::Vector2d point, Eigen::Vector3d origin);
         std::tuple<Eigen::Vector3d, Eigen::Matrix3d> cartesianToPolarWithH(Eigen::Vector2d point, Eigen::Vector3d origin);
         Eigen::Vector2d tfBasefpToMap(Eigen::Vector2d point, Eigen::Vector3d robot_pose);
