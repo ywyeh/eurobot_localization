@@ -9,9 +9,13 @@ void Ekf::initialize(){
     nh_.param<double>("initial_theta", p_initial_theta_deg_, 90.0);
 
     // for beacon position in map list<double>{ax, ay, bx, by, cx, cy}
-    Eigen::Vector2d beacon_a {0.05,  3.1};
-    Eigen::Vector2d beacon_b {1.05, -0.1};
-    Eigen::Vector2d beacon_c {1.95,  3.1};
+    Eigen::Vector2d beacon_a {0.05,  3.1}; // in dit is {0.05, 3.05}
+    Eigen::Vector2d beacon_b {1.05, -0.1}; // in dit is {1.0, -0.05}
+    Eigen::Vector2d beacon_c {1.95,  3.1};  // in dit is {1.95, 3.05}
+    // in dit 
+    // Eigen::Vector2d beacon_a {0.05,  3.05};
+    // Eigen::Vector2d beacon_b {1.0, -0.05};
+    // Eigen::Vector2d beacon_c {1.95,  3.05};
     beacon_in_map_ = {beacon_a, beacon_b, beacon_c};
 
     // for debug
