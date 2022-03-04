@@ -110,8 +110,8 @@ void Ekf::predict_diff(double v, double w){
     robotstate_bar_.sigma = G*robotstate_past_.sigma*G.transpose() + V*M*V.transpose();
 }
 
-void Ekf::predict_ormi(double v, double w){
-    // TODO ekf predict function for ormi
+void Ekf::predict_omni(double v, double w){
+    // TODO ekf predict function for omni
 }
 
 void Ekf::update(){

@@ -27,7 +27,7 @@ class Ekf{
     private:
         // ekf 
         void predict_diff(double v, double w);
-        void predict_ormi(double v, double w);
+        void predict_omni(double v, double w);
         void update();
 
         // several util function
