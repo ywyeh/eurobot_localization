@@ -1,5 +1,8 @@
 <launch>
-    <node name="ekf" pkg="eurobot_localization" type="ekf" output="screen">
-        <rosparam file="$(find eurobot_localization)/config/ekf_dit.yaml"/>
-    </node>
+    <arg name="robot" value="robot1" />
+    <group ns="$(arg robot)">
+        <node name="ekf" pkg="eurobot_localization" type="ekf" output="screen">
+            <rosparam file="$(find eurobot_localization)/config/ekf_dit.yaml"/>
+        </node>
+    </group>
 </launch>
