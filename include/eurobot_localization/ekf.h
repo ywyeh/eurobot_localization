@@ -48,6 +48,12 @@ class Ekf{
         void broadcastEkfTransform(const nav_msgs::Odometry::ConstPtr& odom_msg);
 
         // for beacon position in map std::list<double>{ax, ay, bx, by, cx, cy}
+        double p_beacon_ax_;
+        double p_beacon_ay_;
+        double p_beacon_bx_;
+        double p_beacon_by_;
+        double p_beacon_cx_;
+        double p_beacon_cy_;
         std::list<Eigen::Vector2d> beacon_in_map_;
 
         // for beacon piller detection
@@ -62,20 +68,26 @@ class Ekf{
         RobotState robotstate_past_;
         RobotState robotstate_bar_;
         RobotState robotstate_;
+        double p_odom_freq_;
         double dt_;
 
         // ekf parameter
         // motion covariance
-        double a1_;
-        double a2_;
-        double a3_;
-        double a4_;
-        // measure noise
-        Eigen::DiagonalMatrix<double, 3> Q_;
-        // set minimum likelihood value
-        double mini_likelihood_;
-        double mini_likelihood_update_;
+        double p_a1_;
+        double p_a2_;
+        double p_a3_;
+        double p_a4_;
 
+        // measure noise
+        double p_Q1_;
+        double p_Q2_;
+        double p_Q3_;
+        Eigen::DiagonalMatrix<double, 3> Q_;
+
+        // set minimum likelihood value
+        double p_mini_likelihood_;
+        double p_mini_likelihood_update_;
+        double p_max_obstacle_distance_;
 
         // ros parameter
         std::string p_robot_name_;

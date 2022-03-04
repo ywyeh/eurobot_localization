@@ -1,0 +1,5 @@
+<launch>
+    <node name="ekf" pkg="eurobot_localization" type="ekf" output="screen">
+        <rosparam file="$(find eurobot_localization)/config/ekf_stage.yaml"/>
+    </node>
+</launch>

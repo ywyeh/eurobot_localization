@@ -7,15 +7,18 @@ void Ekf::initialize(){
     nh_.param<double>("initial_x", p_initial_x_, 0.5);
     nh_.param<double>("initial_y", p_initial_y_, 0.5);
     nh_.param<double>("initial_theta", p_initial_theta_deg_, 90.0);
-
+    
+    nh_.param<double>("beacon_ax", p_beacon_ax_, 0.05);
+    nh_.param<double>("beacon_ay", p_beacon_ay_, 3.1);
+    nh_.param<double>("beacon_bx", p_beacon_bx_, 1.05);
+    nh_.param<double>("beacon_by", p_beacon_by_, -0.1);
+    nh_.param<double>("beacon_cx", p_beacon_cx_, 1.95);
+    nh_.param<double>("beacon_cy", p_beacon_cy_, 3.1);
     // for beacon position in map list<double>{ax, ay, bx, by, cx, cy}
-    Eigen::Vector2d beacon_a {0.05,  3.1}; // in dit is {0.05, 3.05}
-    Eigen::Vector2d beacon_b {1.05, -0.1}; // in dit is {1.0, -0.05}
-    Eigen::Vector2d beacon_c {1.95,  3.1};  // in dit is {1.95, 3.05}
-    // in dit 
-    // Eigen::Vector2d beacon_a {0.05,  3.05};
-    // Eigen::Vector2d beacon_b {1.0, -0.05};
-    // Eigen::Vector2d beacon_c {1.95,  3.05};
+    Eigen::Vector2d beacon_a {p_beacon_ax_, p_beacon_ay_}; 
+    Eigen::Vector2d beacon_b {p_beacon_bx_, p_beacon_by_}; 
+    Eigen::Vector2d beacon_c {p_beacon_cx_, p_beacon_cy_}; 
+
     beacon_in_map_ = {beacon_a, beacon_b, beacon_c};
 
     // for debug
@@ -29,20 +32,29 @@ void Ekf::initialize(){
     robotstate_bar_.sigma << 0, 0, 0, 0, 0, 0, 0, 0, 0;
     robotstate_.mu << 0, 0, 0;
     robotstate_.sigma << 0, 0, 0, 0, 0, 0, 0, 0, 0;
-    dt_ = 1.0/50.0;
+    
+    nh_.param<double>("odom_freq", p_odom_freq_, 50.0);
+    dt_ = 1.0/p_odom_freq_;
 
     // ekf parameter
-    a1_ = 1.5;
-    a2_ = 2.5;
-    a3_ = 1.5;
-    a4_ = 2.5;
-    Q_ = Eigen::Vector3d{0.01, 0.01, 0.02}.asDiagonal();
+    nh_.param<double>("predict_cov_a1", p_a1_, 1.5);
+    nh_.param<double>("predict_cov_a2", p_a2_, 2.5);
+    nh_.param<double>("predict_cov_a3", p_a3_, 1.5);
+    nh_.param<double>("predict_cov_a4", p_a4_, 2.5);
+
+    nh_.param<double>("update_cov_1", p_Q1_, 0.01);
+    nh_.param<double>("update_cov_2", p_Q2_, 0.01);
+    nh_.param<double>("update_cov_3", p_Q3_, 0.02);
+    Q_ = Eigen::Vector3d{p_Q1_, p_Q2_, p_Q3_}.asDiagonal();
     // use log(j_k)
-    mini_likelihood_ = -10000.0; 
-    mini_likelihood_update_ = 0.4;
+    nh_.param<double>("mini_likelihood", p_mini_likelihood_, -10000.0);
+    nh_.param<double>("mini_likelihood_update", p_mini_likelihood_update_, 0.4);
     // use j_k
     // mini_likelihood_ = 0.0; 
     // mini_likelihood_update_ = 25.0;
+    
+    // for obstacle filtering
+    nh_.param<double>("max_obstacle_distance", p_max_obstacle_distance_, 0.5);
 
     // for beacon piller detection
     if_new_obstacles_ = false;
@@ -93,8 +105,8 @@ void Ekf::predict_diff(double v, double w){
         robotstate_bar_.mu(2) = angleLimitChecking(robotstate_bar_.mu(2));
     }
     
-    M << pow(a1_*v, 2)+pow(a2_*w, 2),                         0.0,
-                                 0.0, pow(a3_*v, 2)+pow(a4_*w, 2);
+    M << pow(p_a1_*v, 2)+pow(p_a2_*w, 2),                             0.0,
+                                     0.0, pow(p_a3_*v, 2)+pow(p_a4_*w, 2);
     robotstate_bar_.sigma = G*robotstate_past_.sigma*G.transpose() + V*M*V.transpose();
 }
 
@@ -107,7 +119,7 @@ void Ekf::update(){
     if(if_new_obstacles_){
         // cout << "beacon: " << endl;
         // vector of the max j_max for each beacon
-        vector<double> j_beacon_max = {mini_likelihood_, mini_likelihood_, mini_likelihood_};
+        vector<double> j_beacon_max = {p_mini_likelihood_, p_mini_likelihood_, p_mini_likelihood_};
         vector<Eigen::Vector3d> z_j_beacon_max = {Eigen::Vector3d(0.0,0.0,0.0),Eigen::Vector3d(0.0,0.0,0.0),Eigen::Vector3d(0.0,0.0,0.0)};
         vector<Eigen::Vector3d> z_i_beacon_max = {Eigen::Vector3d(0.0,0.0,0.0),Eigen::Vector3d(0.0,0.0,0.0),Eigen::Vector3d(0.0,0.0,0.0)};
         // cout << z_j_beacon_max[0] << z_j_beacon_max[1] << z_j_beacon_max[2] << endl;
@@ -121,7 +133,7 @@ void Ekf::update(){
             // transfer landmark_scan type from (x, y) to (r, phi)
             Eigen::Vector3d z_i = cartesianToPolar(landmark_scan, Eigen::Vector3d(0,0,0));
             // cout << "z_i: " << z_i << endl;
-            double j_max = mini_likelihood_;
+            double j_max = p_mini_likelihood_;
             int k_max = 0;
             int k = 0;
             Eigen::Vector3d z_j_max;
@@ -177,7 +189,7 @@ void Ekf::update(){
             }
         }
         for(int i = 0; i < 3; i++){
-            if(j_beacon_max[i] > mini_likelihood_update_){
+            if(j_beacon_max[i] > p_mini_likelihood_update_){
                 // cout << "update, j = " << j_beacon_max[i] << endl;
                 Eigen::Matrix3d K_i;
                 K_i = robotstate_bar_.sigma*H_j_beacon_max[i].transpose()*S_j_beacon_max[i].inverse();
@@ -294,7 +306,7 @@ void Ekf::obstaclesCallback(const obstacle_detector::Obstacles::ConstPtr& obstac
         // filter out those obstacles position do not close the beacon pillar on map
         for(auto const& i : beacon_in_map_){
             double distance = euclideanDistance(xy_map, i);
-            if(distance < 0.5){ // alst time in real world experience we take < 0.5
+            if(distance < p_max_obstacle_distance_){ // alst time in real world experience we take < 0.5
                 // cout << xy_map << endl;
                 beacon_from_scan_.push_back(xy);
             }

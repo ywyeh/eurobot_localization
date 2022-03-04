@@ -1,0 +1,17 @@
+beacon_ax: 0.05
+beacon_ay: 3.1
+beacon_bx: 1.05
+beacon_by: -0.1
+beacon_cx: 1.95
+beacon_cy: 3.1
+odom_freq: 50.0
+predict_cov_a1: 1.5
+predict_cov_a2: 2.5
+predict_cov_a3: 1.5
+predict_cov_a4: 2.5
+update_cov_1: 0.01
+update_cov_2: 0.01
+update_cov_3: 0.02
+mini_likelihood: -10000.0
+mini_likelihood_update: 0.4
+max_obstacle_distance: 0.5
