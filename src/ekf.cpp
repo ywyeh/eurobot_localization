@@ -226,8 +226,9 @@ double Ekf::angleLimitChecking(double theta){
 }
 
 Eigen::Vector3d Ekf:: safeMinusTheta(Eigen::Vector3d a, Eigen::Vector3d b){
+    // in this function, minus z(r,theta,signature) and check z(1), theta, is in the bound
     Eigen::Vector3d a_minus_b = a - b;
-    a_minus_b(2) = angleLimitChecking(a_minus_b(2));
+    a_minus_b(1) = angleLimitChecking(a_minus_b(1));
     return a_minus_b;
 }
 
