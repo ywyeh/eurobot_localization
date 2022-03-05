@@ -216,10 +216,10 @@ double Ekf::euclideanDistance(Eigen::Vector2d a, Eigen::Vector2d b){
 }
 
 double Ekf::angleLimitChecking(double theta){
-    if(theta > M_PI){
+    while(theta > M_PI){
         theta -= M_PI*2;
     }
-    else if (theta <= -M_PI){
+    while(theta <= -M_PI){
         theta += M_PI*2;
     }
     return theta;
