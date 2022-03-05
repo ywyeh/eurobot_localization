@@ -2,25 +2,24 @@
 using namespace std;
 
 void Ekf::initialize(){
-    // get parameter
+    // get global parameter
     nh_.param<string>("robot_name", p_robot_name_, "");
     nh_.param<double>("initial_x", p_initial_x_, 0.5);
     nh_.param<double>("initial_y", p_initial_y_, 0.5);
     nh_.param<double>("initial_theta", p_initial_theta_deg_, 90.0);
     
-    nh_.param<double>("beacon_ax", p_beacon_ax_, 0.05);
-    nh_.param<double>("beacon_ay", p_beacon_ay_, 3.1);
-    nh_.param<double>("beacon_bx", p_beacon_bx_, 1.05);
-    nh_.param<double>("beacon_by", p_beacon_by_, -0.1);
-    nh_.param<double>("beacon_cx", p_beacon_cx_, 1.95);
-    nh_.param<double>("beacon_cy", p_beacon_cy_, 3.1);
+    // get local parameter
+    nh_local_.param<double>("beacon_ax", p_beacon_ax_, 0.05);
+    nh_local_.param<double>("beacon_ay", p_beacon_ay_, 3.1);
+    nh_local_.param<double>("beacon_bx", p_beacon_bx_, 1.05);
+    nh_local_.param<double>("beacon_by", p_beacon_by_, -0.1);
+    nh_local_.param<double>("beacon_cx", p_beacon_cx_, 1.95);
+    nh_local_.param<double>("beacon_cy", p_beacon_cy_, 3.1);
     // for beacon position in map list<double>{ax, ay, bx, by, cx, cy}
     Eigen::Vector2d beacon_a {p_beacon_ax_, p_beacon_ay_}; 
     Eigen::Vector2d beacon_b {p_beacon_bx_, p_beacon_by_}; 
     Eigen::Vector2d beacon_c {p_beacon_cx_, p_beacon_cy_}; 
-
     beacon_in_map_ = {beacon_a, beacon_b, beacon_c};
-
     // for debug
     update_beacon_ = {Eigen::Vector2d(0.0,0.0),Eigen::Vector2d(0.0,0.0),Eigen::Vector2d(0.0,0.0)};
 
@@ -33,28 +32,28 @@ void Ekf::initialize(){
     robotstate_.mu << 0, 0, 0;
     robotstate_.sigma << 0, 0, 0, 0, 0, 0, 0, 0, 0;
     
-    nh_.param<double>("odom_freq", p_odom_freq_, 50.0);
+    nh_local_.param<double>("odom_freq", p_odom_freq_, 50.0);
     dt_ = 1.0/p_odom_freq_;
 
     // ekf parameter
-    nh_.param<double>("predict_cov_a1", p_a1_, 1.5);
-    nh_.param<double>("predict_cov_a2", p_a2_, 2.5);
-    nh_.param<double>("predict_cov_a3", p_a3_, 1.5);
-    nh_.param<double>("predict_cov_a4", p_a4_, 2.5);
+    nh_local_.param<double>("predict_cov_a1", p_a1_, 1.5);
+    nh_local_.param<double>("predict_cov_a2", p_a2_, 2.5);
+    nh_local_.param<double>("predict_cov_a3", p_a3_, 1.5);
+    nh_local_.param<double>("predict_cov_a4", p_a4_, 2.5);
 
-    nh_.param<double>("update_cov_1", p_Q1_, 0.01);
-    nh_.param<double>("update_cov_2", p_Q2_, 0.01);
-    nh_.param<double>("update_cov_3", p_Q3_, 0.02);
+    nh_local_.param<double>("update_cov_1", p_Q1_, 0.01);
+    nh_local_.param<double>("update_cov_2", p_Q2_, 0.01);
+    nh_local_.param<double>("update_cov_3", p_Q3_, 0.02);
     Q_ = Eigen::Vector3d{p_Q1_, p_Q2_, p_Q3_}.asDiagonal();
     // use log(j_k)
-    nh_.param<double>("mini_likelihood", p_mini_likelihood_, -10000.0);
-    nh_.param<double>("mini_likelihood_update", p_mini_likelihood_update_, 0.4);
+    nh_local_.param<double>("mini_likelihood", p_mini_likelihood_, -10000.0);
+    nh_local_.param<double>("mini_likelihood_update", p_mini_likelihood_update_, 0.4);
     // use j_k
     // mini_likelihood_ = 0.0; 
     // mini_likelihood_update_ = 25.0;
     
     // for obstacle filtering
-    nh_.param<double>("max_obstacle_distance", p_max_obstacle_distance_, 0.5);
+    nh_local_.param<double>("max_obstacle_distance", p_max_obstacle_distance_, 0.5);
 
     // for beacon piller detection
     if_new_obstacles_ = false;
@@ -378,7 +377,8 @@ void Ekf::publishUpdateBeacon(const ros::Time& stamp){
 int main(int argc, char** argv){
     ros::init(argc, argv, "ekf_localization");
     ros::NodeHandle nh;
-    Ekf ekf(nh);
+    ros::NodeHandle nh_local("~");
+    Ekf ekf(nh, nh_local);
     ekf.initialize();
 
     while(ros::ok()){

@@ -22,7 +22,7 @@ struct RobotState{
 
 class Ekf{
     public:
-        Ekf(ros::NodeHandle& nh): nh_(nh){};
+        Ekf(ros::NodeHandle& nh, ros::NodeHandle& nh_local): nh_(nh), nh_local_(nh_local){};
         void initialize();
     private:
         // ekf 
@@ -97,6 +97,7 @@ class Ekf{
         
         // ros node
         ros::NodeHandle nh_;
+        ros::NodeHandle nh_local_;
         ros::Subscriber odom_sub_;
         ros::Subscriber raw_obstacles_sub_;
         ros::Publisher ekf_pose_pub_;
