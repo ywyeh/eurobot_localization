@@ -1,5 +1,6 @@
 <launch>
+    <arg name="config_name" default="ekf_stage.yaml"/>
     <node name="ekf" pkg="eurobot_localization" type="ekf" output="screen">
-        <rosparam file="$(find eurobot_localization)/config/ekf_stage.yaml"/>
+        <rosparam file="$(find eurobot_localization)/config/$(arg config_name)"/>
     </node>
 </launch>
