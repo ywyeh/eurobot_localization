@@ -1,8 +1,8 @@
 beacon_ax: 0.05
 beacon_ay: 5.1
-beacon_bx: 2.0
+beacon_bx: 1.0
 beacon_by: -0.1
-beacon_cx: 3.95
+beacon_cx: 1.95
 beacon_cy: 5.1
 odom_freq: 50.0
 predict_cov_a1: 1.5
