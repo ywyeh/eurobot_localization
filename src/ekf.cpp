@@ -352,7 +352,7 @@ void Ekf::broadcastEkfTransform(const nav_msgs::Odometry::ConstPtr& odom_msg){
     tf2::Transform map_to_odom = map_to_baseft*odom_to_baseft.inverse();
 
     geometry_msgs::TransformStamped transformStamped;
-    transformStamped.header.stamp = odom_msg->header.stamp;
+    transformStamped.header.stamp = odom_msg->header.stamp + ros::Duration(0.1);
     transformStamped.header.frame_id = "map";
     transformStamped.child_frame_id = p_robot_name_+"/odom";
     transformStamped.transform = tf2::toMsg(map_to_odom);
