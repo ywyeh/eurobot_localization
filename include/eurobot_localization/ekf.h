@@ -11,6 +11,10 @@
 #include <math.h>
 
 #include <Eigen/Dense>
+
+// srv
+#include <std_srvs/Empty.h>
+
 // msg
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <geometry_msgs/TransformStamped.h>
@@ -48,6 +52,10 @@ class Ekf {
     void odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg);
     void obstaclesCallback(const obstacle_detector::Obstacles::ConstPtr& obstacle_msg);
     void poseEstimateCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& pose_msg);
+
+    // for ros reset service
+    bool resetEkf(std_srvs::Empty::Request& req, std_srvs::Empty::Response& res);
+
     void publishEkfPose(const ros::Time& stamp);
     void publishUpdateBeacon(const ros::Time& stamp);
     void broadcastEkfTransform(const nav_msgs::Odometry::ConstPtr& odom_msg);
@@ -100,9 +108,13 @@ class Ekf {
     // ros node
     ros::NodeHandle nh_;
     ros::NodeHandle nh_local_;
+
     ros::Subscriber odom_sub_;
     ros::Subscriber raw_obstacles_sub_;
     ros::Subscriber pose_estimate_sub_;
+
+    ros::ServiceServer ekf_reset_srv_;
+
     ros::Publisher ekf_pose_pub_;
     tf2_ros::TransformBroadcaster br_;
     // for debug

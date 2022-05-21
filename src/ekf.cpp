@@ -58,6 +58,7 @@ void Ekf::initialize() {
     odom_sub_ = nh_.subscribe("odom", 50, &Ekf::odomCallback, this);
     raw_obstacles_sub_ = nh_.subscribe("raw_obstacles", 10, &Ekf::obstaclesCallback, this);
     pose_estimate_sub_ = nh_.subscribe("initialpose", 10, &Ekf::poseEstimateCallback, this);
+    ekf_reset_srv_ = nh_.advertiseService("reset_ekf", &Ekf::resetEkf, this);
     ekf_pose_pub_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("ekf_pose", 10);
     update_beacon_pub_ = nh_.advertise<obstacle_detector::Obstacles>("update_beacon", 10);
 
@@ -313,6 +314,14 @@ void Ekf::poseEstimateCallback(const geometry_msgs::PoseWithCovarianceStamped::C
     robotstate_.sigma << 0, 0, 0, 0, 0, 0, 0, 0, 0;
     std::string print_robot_name = (p_robot_name_ == "") ? "robot" : p_robot_name_;
     ROS_INFO("the %s pose is set to: (%.2f, %.2f, %.2f)", print_robot_name.c_str(), robotstate_.mu(0), robotstate_.mu(1), robotstate_.mu(2));
+}
+
+bool Ekf::resetEkf(std_srvs::Empty::Request& req, std_srvs::Empty::Response& res) {
+    robotstate_.mu << p_initial_x_, p_initial_y_, degToRad(p_initial_theta_deg_);
+    robotstate_.sigma << 0, 0, 0, 0, 0, 0, 0, 0, 0;
+    std::string print_robot_name = (p_robot_name_ == "") ? "robot" : p_robot_name_;
+    ROS_INFO("the %s pose is set to: (%.2f, %.2f, %.2f)", print_robot_name.c_str(), robotstate_.mu(0), robotstate_.mu(1), robotstate_.mu(2));
+    return true;
 }
 
 void Ekf::publishEkfPose(const ros::Time& stamp) {
