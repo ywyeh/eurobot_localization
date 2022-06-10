@@ -27,9 +27,6 @@ void Ekf::initialize() {
     robotstate_.mu << p_initial_x_, p_initial_y_, degToRad(p_initial_theta_deg_);
     robotstate_.sigma << 0, 0, 0, 0, 0, 0, 0, 0, 0;
 
-    nh_local_.param<double>("odom_freq", p_odom_freq_, 50.0);
-    dt_ = 1.0 / p_odom_freq_;
-
     // ekf parameter
     nh_local_.param<double>("predict_cov_a1", p_a1_, 1.5);
     nh_local_.param<double>("predict_cov_a2", p_a2_, 2.5);
@@ -265,6 +262,8 @@ void Ekf::odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg) {
     const ros::Time stamp = ros::Time::now() + ros::Duration(0.2);
     double v = odom_msg->twist.twist.linear.x;
     double w = odom_msg->twist.twist.angular.z;
+    dt_ = odom_msg->header.stamp.toSec() - last_cb_time_.toSec();
+    last_cb_time_ = odom_msg->header.stamp;
     // cout << "v: " << v << "w: " << w << endl;
     // for calculate time cost
     // struct timespec tt1, tt2;

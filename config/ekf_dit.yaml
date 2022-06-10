@@ -4,7 +4,6 @@ beacon_bx: 1.0
 beacon_by: -0.05
 beacon_cx: 1.95
 beacon_cy: 3.05
-odom_freq: 50.0
 predict_cov_a1: 1.5
 predict_cov_a2: 2.5
 predict_cov_a3: 1.5

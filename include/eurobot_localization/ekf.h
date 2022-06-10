@@ -78,7 +78,7 @@ class Ekf {
 
     // for robot state
     RobotState robotstate_;
-    double p_odom_freq_;
+    ros::Time last_cb_time_;
     double dt_;
 
     // ekf parameter
