@@ -1,9 +1,9 @@
-beacon_ax: 0.08
-beacon_ay: 3.98
+beacon_ax: 0.44
+beacon_ay: 3.12
 beacon_bx: 1.14
 beacon_by: -0.08
-beacon_cx: 2.22
-beacon_cy: 3.98
+beacon_cx: 1.84
+beacon_cy: 3.12
 predict_cov_a1: 1.5
 predict_cov_a2: 2.5
 predict_cov_a3: 1.5
