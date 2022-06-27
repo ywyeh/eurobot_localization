@@ -8,9 +8,9 @@ predict_cov_a1: 1.5
 predict_cov_a2: 2.5
 predict_cov_a3: 1.5
 predict_cov_a4: 2.5
-update_cov_1: 0.1
-update_cov_2: 0.1
-update_cov_3: 0.2
+update_cov_1: 0.05
+update_cov_2: 0.05
+update_cov_3: 0.1
 mini_likelihood: -10000.0
 mini_likelihood_update: 0.4
 max_obstacle_distance: 0.5
