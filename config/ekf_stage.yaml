@@ -1,6 +1,6 @@
 beacon_ax: 0.05
 beacon_ay: 3.1
-beacon_bx: 1.05
+beacon_bx: 1.0
 beacon_by: -0.1
 beacon_cx: 1.95
 beacon_cy: 3.1
